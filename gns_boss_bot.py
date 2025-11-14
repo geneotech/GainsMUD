@@ -16,9 +16,12 @@ from aiogram import html
 
 # Configuration
 DATA_FILE = "gns_boss_data.json"
-COOLDOWN_MINUTES = 0.01
+COOLDOWN_MINUTES = 30
 MAX_SUPPLY = 34_000_000
 MAX_RECENT_DAMAGES = 5
+SUPPLY_FETCH_ATTEMPTS=5
+SUPPLY_FETCH_SES=4
+DEAD_WALLET_BALANCE = 311603
 
 def code_block(text: str) -> str:
     replacements = {
@@ -32,7 +35,7 @@ def code_block(text: str) -> str:
 def truncate_nickname(nickname, max_length=15):
     if len(nickname) <= max_length:
         return nickname
-    return nickname[:max_length-2] + ".."
+    return nickname[:max_length - 2] + ".."
 
 def generate_progress_bar(current, maximum, length=25):
     ratio = current / maximum
@@ -48,26 +51,43 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
     supply_line = f"[{current_str:>11} /{max_str:>11} ]"
 
     damage_lines = []
-    for (dmg, attacker) in recent_damages[-MAX_RECENT_DAMAGES:]:
-        nick = truncate_nickname(attacker, 12)
+    for dmg, attacker in recent_damages[-MAX_RECENT_DAMAGES:]:
         if dmg == 0:
-            line = f"           ✖  {nick:<12}"
+            nick = truncate_nickname(attacker, 12)
+            line = f"      <miss>  "
             damage_lines.append(line.ljust(27))
+
+        elif attacker == "":
+            # Healing event
+            heal_str = f"+{dmg:,}".replace(",", " ")
+            line = f"{heal_str}               "
+            damage_lines.append(line.rjust(27))
+
         else:
             dmg_str = f"{dmg:,}".replace(",", " ")
+            nick = truncate_nickname(attacker, 12)
             line = f"-{dmg_str}  {nick:<12} "
             damage_lines.append(line.rjust(27))
 
-    attacker_nick = truncate_nickname(last_attacker)
+    attacker_lines = []
     TOTAL_WIDTH = 27
 
-    if last_damage > 0:
+    if last_damage > 0 and last_attacker != "":
         dmg_str = f"{last_damage:,}".replace(",", " ")
-        attacker_line1 = f" > {attacker_nick} deals  ".ljust(TOTAL_WIDTH)
-        attacker_line2 = f"   {dmg_str} Fire Damage".ljust(TOTAL_WIDTH)
-    else:
-        attacker_line1 = f" > {attacker_nick} misses!".ljust(TOTAL_WIDTH)
-        attacker_line2 = "   Attack had no effect!".ljust(TOTAL_WIDTH)
+        attacker_nick = truncate_nickname(last_attacker)
+        attacker_lines.append(f" > {attacker_nick} deals  ".ljust(TOTAL_WIDTH))
+        attacker_lines.append(f"   {dmg_str} [Fire Damage]".ljust(TOTAL_WIDTH))
+        attacker_lines.append("   to the Dragonlord.    ".ljust(TOTAL_WIDTH))
+
+    elif last_damage == 0 and last_attacker != "":
+        attacker_nick = truncate_nickname(last_attacker)
+        attacker_lines.append(f" > {attacker_nick} misses!".ljust(TOTAL_WIDTH))
+        attacker_lines.append("   Attack had no effect! ".ljust(TOTAL_WIDTH))
+
+    elif last_attacker == "" and last_damage > 0:
+        heal_str = f"{last_damage:,}".replace(",", " ")
+        attacker_lines.append(" > The Dragonlord heals!  ".ljust(TOTAL_WIDTH))
+        attacker_lines.append(f"   +{heal_str} Hit Points. ".ljust(TOTAL_WIDTH))
 
     sorted_players = sorted(players.items(), key=lambda x: x[1]['damage'], reverse=True)
     leaderboard_lines = []
@@ -87,6 +107,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
         f".[{progress_bar}].",
         ".                           .",
     ]
+
     for line in reversed(damage_lines):
         lines.append(f".{line}.")
 
@@ -107,9 +128,6 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
         ".                    \\      .",
         ".                           .",
         "-----------------------------",
-    ])
-
-    lines.extend([
         ". Damage leaderboard:       .",
         ".                           .",
     ])
@@ -123,13 +141,8 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
         "-----------------------------",
     ])
 
-    lines.extend([
-        f".{attacker_line1}.",
-        f".{attacker_line2}."
-    ])
-
-    if last_damage > 0:
-        lines.append(".   to the Dragonlord.      .")
+    for line in attacker_lines:
+        lines.append(f".{line}.")
 
     lines.append("-----------------------------")
 
@@ -140,14 +153,14 @@ def load_data():
         with open(DATA_FILE, 'r') as f:
             data = json.load(f)
             data.setdefault('recent_damages', [])
-            data.setdefault('last_attacker', "Unknown")
+            data.setdefault('last_attacker', "")
             data.setdefault('last_damage', 0)
             return data
     return {
         "last_supply": None,
         "players": {},
         "recent_damages": [],
-        "last_attacker": "Unknown",
+        "last_attacker": "",
         "last_damage": 0
     }
 
@@ -159,7 +172,7 @@ def get_cooldown_remaining(last_attack_time):
     if not last_attack_time:
         return 0
     elapsed = time.time() - last_attack_time
-    return max(0, COOLDOWN_MINUTES*60 - elapsed)
+    return max(0, COOLDOWN_MINUTES * 60 - elapsed)
 
 def format_time(seconds):
     if seconds <= 0:
@@ -173,26 +186,22 @@ def format_time(seconds):
 async def get_gns_total_supply():
     url = "https://backend-arbitrum.gains.trade/stats"
 
-    for attempt in range(3):
+    for attempt in range(SUPPLY_FETCH_ATTEMPTS):
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with httpx.AsyncClient(timeout=SUPPLY_FETCH_SES) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 data = resp.json()
                 if data and 'stats' in data and len(data['stats']) > 0:
-                    return data['stats'][0]['token_supply']
+                    return data['stats'][0]['token_supply'] - DEAD_WALLET_BALANCE 
                 return None
 
         except Exception as e:
-            print(f"[Attempt {attempt+1}/3] Error fetching supply: {e}")
+            print(f"[Attempt {attempt+1}/{SUPPLY_FETCH_ATTEMPTS}] Error fetching supply: {e}")
             if attempt < 2:
                 await asyncio.sleep(0.5)
 
     return None
-
-# ---------------------------
-# Command handlers
-# ---------------------------
 
 async def handle_sup_command(message: Message):
     print("Sup command detected")
@@ -211,9 +220,10 @@ async def handle_sup_command(message: Message):
         data['players'][username] = {'damage': 0, 'last_attack': None}
 
     player = data['players'][username]
-    cooldown_remaining = get_cooldown_remaining(player['last_attack'])
-    if cooldown_remaining > 0:
-        await message.reply(f"⏳ You can attack again in: *{format_time(cooldown_remaining)}*", parse_mode="Markdown")
+
+    cd = get_cooldown_remaining(player['last_attack'])
+    if cd > 0:
+        await message.reply(f"⏳ You can attack again in: *{format_time(cd)}*", parse_mode="Markdown")
         return
 
     current_supply = await get_gns_total_supply()
@@ -232,22 +242,33 @@ async def handle_sup_command(message: Message):
 
     damage = data['last_supply'] - current_supply
 
+    # -------------------------
+    # Healing logic
+    # NO COOLDOWN
+    # -------------------------
     if damage < 0:
         healed = -damage
-        data['recent_damages'].append((0, username))
-        data['last_attacker'] = username
-        data['last_damage'] = 0
-        player['last_attack'] = time.time()
+        data['recent_damages'].append((healed, ""))   # empty attacker
+        data['last_attacker'] = ""
+        data['last_damage'] = healed
+
+        # NOTE: cooldown NOT applied
+        data['last_supply'] = current_supply
         save_data(data)
 
-        healed_str = f"{healed:,}".replace(",", " ")
-        await message.reply(
-            f"💚 *The Dragonlord has healed*\n{healed_str} *Hit Points!*",
-            parse_mode="Markdown"
+        supplarius = format_supplarius(
+            current_supply,
+            data['recent_damages'],
+            data['last_attacker'],
+            data['last_damage'],
+            data['players']
         )
+        await message.reply(code_block(supplarius), parse_mode="MarkdownV2")
         return
 
-    # Normal damage logic
+    # -------------------------
+    # Normal attack logic
+    # -------------------------
     data['recent_damages'].append((damage, username))
     data['last_attacker'] = username
     data['last_damage'] = damage
@@ -259,8 +280,20 @@ async def handle_sup_command(message: Message):
     data['last_supply'] = current_supply
     save_data(data)
 
-    supplarius = format_supplarius(current_supply, data['recent_damages'], username, damage, data['players'])
+    supplarius = format_supplarius(
+        current_supply,
+        data['recent_damages'],
+        data['last_attacker'],
+        data['last_damage'],
+        data['players']
+    )
+
     await message.reply(code_block(supplarius), parse_mode="MarkdownV2")
+
+
+# ---------------------------------------------------
+# MAIN
+# ---------------------------------------------------
 
 async def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
