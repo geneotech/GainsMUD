@@ -7,6 +7,7 @@ import os
 import json
 import time
 from datetime import datetime
+import asyncio
 import httpx
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -24,10 +25,8 @@ def code_block(text: str) -> str:
         '\\': '\\\\',
         '`': '\\`',
     }
-
     for old, new in replacements.items():
         text = text.replace(old, new)
-
     return "```\n" + text + "\n```"
 
 def truncate_nickname(nickname, max_length=15):
@@ -51,34 +50,23 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
     damage_lines = []
     for (dmg, attacker) in recent_damages[-MAX_RECENT_DAMAGES:]:
         nick = truncate_nickname(attacker, 12)
-
         if dmg == 0:
-            line = f"     <miss>  {nick:<12}"
+            line = f"           ✖  {nick:<12}"
             damage_lines.append(line.ljust(27))
         else:
             dmg_str = f"{dmg:,}".replace(",", " ")
-            # "-" + number, then 2 spaces, then nickname
-            line = f"    -{dmg_str}  {nick:<12}"
-            damage_lines.append(line.ljust(27))
-
-    while len(damage_lines) < MAX_RECENT_DAMAGES:
-        damage_lines.insert(0, "                           ")
+            line = f"-{dmg_str}  {nick:<12} "
+            damage_lines.append(line.rjust(27))
 
     attacker_nick = truncate_nickname(last_attacker)
     TOTAL_WIDTH = 27
 
     if last_damage > 0:
         dmg_str = f"{last_damage:,}".replace(",", " ")
-        attacker_line1 = f" > {attacker_nick} deals  "
-        attacker_line1 = attacker_line1.ljust(TOTAL_WIDTH)
-
-        attacker_line2 = f"   {dmg_str} Fire Damage"
-        attacker_line2 = attacker_line2.ljust(TOTAL_WIDTH)
-
+        attacker_line1 = f" > {attacker_nick} deals  ".ljust(TOTAL_WIDTH)
+        attacker_line2 = f"   {dmg_str} Fire Damage".ljust(TOTAL_WIDTH)
     else:
-        text = f" > {attacker_nick} misses!"
-        attacker_line1 = text.ljust(TOTAL_WIDTH)
-
+        attacker_line1 = f" > {attacker_nick} misses!".ljust(TOTAL_WIDTH)
         attacker_line2 = "   Attack had no effect!".ljust(TOTAL_WIDTH)
 
     sorted_players = sorted(players.items(), key=lambda x: x[1]['damage'], reverse=True)
@@ -99,7 +87,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
         f".[{progress_bar}].",
         ".                           .",
     ]
-    for line in damage_lines:
+    for line in reversed(damage_lines):
         lines.append(f".{line}.")
 
     lines.extend([
@@ -119,7 +107,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
         ".                    \\      .",
         ".                           .",
         "-----------------------------",
-        ])
+    ])
 
     lines.extend([
         ". Damage leaderboard:       .",
@@ -141,13 +129,9 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
     ])
 
     if last_damage > 0:
-        lines.extend([
-            ".   to the Dragonlord.      .",
-        ])
+        lines.append(".   to the Dragonlord.      .")
 
-    lines.extend([
-        "-----------------------------"
-    ])
+    lines.append("-----------------------------")
 
     return "\n".join(lines)
 
@@ -155,12 +139,9 @@ def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, 'r') as f:
             data = json.load(f)
-            if 'recent_damages' not in data:
-                data['recent_damages'] = []
-            if 'last_attacker' not in data:
-                data['last_attacker'] = "Unknown"
-            if 'last_damage' not in data:
-                data['last_damage'] = 0
+            data.setdefault('recent_damages', [])
+            data.setdefault('last_attacker', "Unknown")
+            data.setdefault('last_damage', 0)
             return data
     return {
         "last_supply": None,
@@ -169,7 +150,6 @@ def load_data():
         "last_attacker": "Unknown",
         "last_damage": 0
     }
-
 
 def save_data(data):
     with open(DATA_FILE, 'w') as f:
@@ -192,26 +172,39 @@ def format_time(seconds):
 
 async def get_gns_total_supply():
     url = "https://backend-arbitrum.gains.trade/stats"
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-            if data and 'stats' in data and len(data['stats']) > 0:
-                return data['stats'][0]['token_supply']
-            return None
-    except Exception as e:
-        print(f"Error fetching supply: {e}")
-        return None
+
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+                if data and 'stats' in data and len(data['stats']) > 0:
+                    return data['stats'][0]['token_supply']
+                return None
+
+        except Exception as e:
+            print(f"[Attempt {attempt+1}/3] Error fetching supply: {e}")
+            if attempt < 2:
+                await asyncio.sleep(0.5)
+
+    return None
 
 # ---------------------------
 # Command handlers
 # ---------------------------
 
 async def handle_sup_command(message: Message):
-    print ("Sup command detected")
+    print("Sup command detected")
 
-    username = message.from_user.username or message.from_user.first_name or f"User{message.from_user.id}"
+    user = message.from_user
+    username = (
+        user.full_name
+        or user.first_name
+        or user.username
+        or f"User{user.id}"
+    )
+
     data = load_data()
 
     if username not in data['players']:
@@ -231,16 +224,38 @@ async def handle_sup_command(message: Message):
     if data['last_supply'] is None:
         data['last_supply'] = current_supply
         save_data(data)
-        await message.reply(f"🎮 *BOSS BATTLE INITIALIZED!*\n\n🐉 HP: *{current_supply:,}*\nAttack again to deal damage!", parse_mode="Markdown")
+        await message.reply(
+            f"🎮 *BOSS BATTLE INITIALIZED!*\n\n🐉 HP: *{current_supply:,}*\nAttack again to deal damage!",
+            parse_mode="Markdown"
+        )
         return
 
     damage = data['last_supply'] - current_supply
+
+    if damage < 0:
+        healed = -damage
+        data['recent_damages'].append((0, username))
+        data['last_attacker'] = username
+        data['last_damage'] = 0
+        player['last_attack'] = time.time()
+        save_data(data)
+
+        healed_str = f"{healed:,}".replace(",", " ")
+        await message.reply(
+            f"💚 *The Dragonlord has healed*\n{healed_str} *Hit Points!*",
+            parse_mode="Markdown"
+        )
+        return
+
+    # Normal damage logic
     data['recent_damages'].append((damage, username))
     data['last_attacker'] = username
     data['last_damage'] = damage
     player['last_attack'] = time.time()
+
     if damage > 0:
         player['damage'] += damage
+
     data['last_supply'] = current_supply
     save_data(data)
 
