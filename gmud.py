@@ -67,7 +67,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
     for dmg, attacker in recent_damages[-MAX_RECENT_DAMAGES:]:
         if dmg == 0:
             nick = truncate_nickname(attacker, 12)
-            line = f"      <miss>  "
+            line = f"      <miss>  {nick:<12} "
             damage_lines.append(line.ljust(27))
 
         elif attacker == "":
