@@ -30,6 +30,7 @@ SUPPLY_FETCH_ATTEMPTS=5
 SUPPLY_FETCH_SES=4
 # DEAD_WALLET_BALANCE = 311603
 DEAD_WALLET_BALANCE = 0
+DATA_LOCK = asyncio.Lock()
 
 def code_block(text: str) -> str:
     replacements = {
@@ -81,6 +82,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
 
     attacker_lines = []
     TOTAL_WIDTH = 27
+    any_effect = True
 
     if last_damage > 0 and last_attacker != "":
         dmg_str = f"{last_damage:,}".replace(",", " ")
@@ -93,6 +95,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
         attacker_nick = truncate_nickname(last_attacker)
         attacker_lines.append(f" > {attacker_nick} misses!".ljust(TOTAL_WIDTH))
         attacker_lines.append("   Attack had no effect! ".ljust(TOTAL_WIDTH))
+        any_effect = False
 
     elif last_attacker == "" and last_damage > 0:
         heal_str = f"{last_damage:,}".replace(",", " ")
@@ -122,22 +125,26 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
     for line in reversed(damage_lines):
         lines.append(f".{line}.")
 
+    if any_effect:
+        lines.extend([
+            ".                           .",
+            ".                    ,-,-   .",
+            ".                   / / |   .",
+            ". ,-'             _/ / /    .",
+            ".(-_          _,-' `Z_/     .",
+            ". \"#:      ,-'_,-.    \\  _  .",
+            ".  #'    _(_-'_()\\     \\\" | .",
+            ".,--_,--'                 | .",
+            ". \"\"                      L-.",
+            ".,--^---v--v-._        /   \\.",
+            ". \\_________________,-'     .",
+            ".                  \\        .",
+            ".                   \\       .",
+            ".                    \\      .",
+            ".                           .",
+        ])
+
     lines.extend([
-        ".                           .",
-        ".                    ,-,-   .",
-        ".                   / / |   .",
-        ". ,-'             _/ / /    .",
-        ".(-_          _,-' `Z_/     .",
-        ". \"#:      ,-'_,-.    \\  _  .",
-        ".  #'    _(_-'_()\\     \\\" | .",
-        ".,--_,--'                 | .",
-        ". \"\"                      L-.",
-        ".,--^---v--v-._        /   \\.",
-        ". \\_________________,-'     .",
-        ".                  \\        .",
-        ".                   \\       .",
-        ".                    \\      .",
-        ".                           .",
         "-----------------------------",
     ])
 
@@ -204,62 +211,87 @@ async def get_gns_total_supply():
     return None
 
 async def handle_sup_command(message: Message):
-    print("Sup command detected")
+    async with DATA_LOCK:
+        print("Sup command detected")
 
-    # Skip messages sent before bot started
-    message_ts = message.date.replace(tzinfo=timezone.utc).timestamp()
+        # Skip messages sent before bot started
+        message_ts = message.date.replace(tzinfo=timezone.utc).timestamp()
 
-    if message_ts < BOT_START_TIME:
-        print("Ignoring stale message")
-        return  # ignore old messages
+        if message_ts < BOT_START_TIME:
+            print("Ignoring stale message")
+            return  # ignore old messages
 
-    user = message.from_user
-    username = (
-        user.full_name
-        or user.first_name
-        or user.username
-        or f"User{user.id}"
-    )
-
-    data = load_data()
-
-    if username not in data['players']:
-        data['players'][username] = {'damage': 0, 'last_attack': None}
-
-    player = data['players'][username]
-
-    cd = get_cooldown_remaining(player['last_attack'])
-    if cd > 0:
-        await message.reply(f"⏳ You can attack again in: *{format_time(cd)}*", parse_mode="Markdown")
-        return
-
-    current_supply = await get_gns_total_supply()
-    if current_supply is None:
-        await message.reply("❌ Failed to fetch GNS supply. Try again later.")
-        return
-
-    if data['last_supply'] is None:
-        data['last_supply'] = current_supply
-        save_data(data)
-        await message.reply(
-            f"🎮 *BOSS BATTLE INITIALIZED!*\n\n🐉 HP: *{current_supply:,}*\nAttack again to deal damage!",
-            parse_mode="Markdown"
+        user = message.from_user
+        username = (
+            user.full_name
+            or user.first_name
+            or user.username
+            or f"User{user.id}"
         )
-        return
 
-    damage = data['last_supply'] - current_supply
+        data = load_data()
 
-    # -------------------------
-    # Healing logic
-    # NO COOLDOWN
-    # -------------------------
-    if damage < 0:
-        healed = -damage
-        data['recent_damages'].append((healed, ""))   # empty attacker
-        data['last_attacker'] = ""
-        data['last_damage'] = healed
+        if username not in data['players']:
+            data['players'][username] = {'damage': 0, 'last_attack': None}
 
-        # NOTE: cooldown NOT applied
+        player = data['players'][username]
+
+        cd = get_cooldown_remaining(player['last_attack'])
+        if cd > 0:
+            await message.reply(f"⏳ You can attack again in: *{format_time(cd)}*", parse_mode="Markdown")
+            return
+
+        current_supply = await get_gns_total_supply()
+        if current_supply is None:
+            await message.reply("❌ Failed to fetch GNS supply. Try again later.")
+            return
+
+        if data['last_supply'] is None:
+            data['last_supply'] = current_supply
+            save_data(data)
+            await message.reply(
+                f"🎮 *BOSS BATTLE INITIALIZED!*\n\n🐉 HP: *{current_supply:,}*\nAttack again to deal damage!",
+                parse_mode="Markdown"
+            )
+            return
+
+        damage = data['last_supply'] - current_supply
+
+        # -------------------------
+        # Healing logic
+        # NO COOLDOWN
+        # -------------------------
+        if damage < 0:
+            healed = -damage
+            data['recent_damages'].append((healed, ""))   # empty attacker
+            data['last_attacker'] = ""
+            data['last_damage'] = healed
+
+            # NOTE: cooldown NOT applied
+            data['last_supply'] = current_supply
+            save_data(data)
+
+            supplarius = format_supplarius(
+                current_supply,
+                data['recent_damages'],
+                data['last_attacker'],
+                data['last_damage'],
+                data['players']
+            )
+            await message.reply(code_block(supplarius), parse_mode="MarkdownV2")
+            return
+
+        # -------------------------
+        # Normal attack logic
+        # -------------------------
+        data['recent_damages'].append((damage, username))
+        data['last_attacker'] = username
+        data['last_damage'] = damage
+        player['last_attack'] = time.time()
+
+        if damage > 0:
+            player['damage'] += damage
+
         data['last_supply'] = current_supply
         save_data(data)
 
@@ -270,68 +302,45 @@ async def handle_sup_command(message: Message):
             data['last_damage'],
             data['players']
         )
+
         await message.reply(code_block(supplarius), parse_mode="MarkdownV2")
-        return
-
-    # -------------------------
-    # Normal attack logic
-    # -------------------------
-    data['recent_damages'].append((damage, username))
-    data['last_attacker'] = username
-    data['last_damage'] = damage
-    player['last_attack'] = time.time()
-
-    if damage > 0:
-        player['damage'] += damage
-
-    data['last_supply'] = current_supply
-    save_data(data)
-
-    supplarius = format_supplarius(
-        current_supply,
-        data['recent_damages'],
-        data['last_attacker'],
-        data['last_damage'],
-        data['players']
-    )
-
-    await message.reply(code_block(supplarius), parse_mode="MarkdownV2")
 
 async def handle_gmud_command(message: Message):
-    message_ts = message.date.replace(tzinfo=timezone.utc).timestamp()
-    if message_ts < BOT_START_TIME:
-        print("Ignoring stale message")
-        return
+    async with DATA_LOCK:
+        message_ts = message.date.replace(tzinfo=timezone.utc).timestamp()
+        if message_ts < BOT_START_TIME:
+            print("Ignoring stale message")
+            return
 
-    data = load_data()
-    players = data.get("players", {})
+        data = load_data()
+        players = data.get("players", {})
 
-    if not players:
-        await message.reply(". No attacks have been recorded yet. .", parse_mode="MarkdownV2")
-        return
+        if not players:
+            await message.reply(". No attacks have been recorded yet. .", parse_mode="MarkdownV2")
+            return
 
-    # Sort all players by damage descending
-    sorted_players = sorted(players.items(), key=lambda x: x[1]['damage'], reverse=True)
+        # Sort all players by damage descending
+        sorted_players = sorted(players.items(), key=lambda x: x[1]['damage'], reverse=True)
 
-    lines = [
-        "---------------------------",
-        ".    GMUD LEADERBOARDS    .",
-        "---------------------------",
-    ]
+        lines = [
+            "---------------------------",
+            ".    GMUD LEADERBOARDS    .",
+            "---------------------------",
+        ]
 
-    # Format each player: nickname and total damage
-    TOTAL_WIDTH = 27
-    for username, pdata in sorted_players:
-        nick = truncate_nickname(username, 12)  # shorter nickname to fit
-        dmg_str = f"{pdata['damage']:,}".replace(",", " ")
-        line_content = f" {nick:<12} {dmg_str:>10} "
-        lines.append(f".{line_content}.")
+        # Format each player: nickname and total damage
+        TOTAL_WIDTH = 27
+        for username, pdata in sorted_players:
+            nick = truncate_nickname(username, 12)  # shorter nickname to fit
+            dmg_str = f"{pdata['damage']:,}".replace(",", " ")
+            line_content = f" {nick:<12} {dmg_str:>10} "
+            lines.append(f".{line_content}.")
 
-    lines.append("---------------------------")
+        lines.append("---------------------------")
 
-    # Send as code block
-    leaderboard_text = code_block("\n".join(lines))
-    await message.reply(leaderboard_text, parse_mode="MarkdownV2")
+        # Send as code block
+        leaderboard_text = code_block("\n".join(lines))
+        await message.reply(leaderboard_text, parse_mode="MarkdownV2")
 
 # ---------------------------------------------------
 # MAIN
