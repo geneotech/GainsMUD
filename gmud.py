@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import os
+import time
+from datetime import timezone
 from dotenv import load_dotenv
 import json
 import time
@@ -11,6 +13,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram import html
 
+BOT_START_TIME = time.time()
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -25,7 +28,8 @@ MAX_SUPPLY = 34_000_000
 MAX_RECENT_DAMAGES = 5
 SUPPLY_FETCH_ATTEMPTS=5
 SUPPLY_FETCH_SES=4
-DEAD_WALLET_BALANCE = 311603
+# DEAD_WALLET_BALANCE = 311603
+DEAD_WALLET_BALANCE = 0
 
 def code_block(text: str) -> str:
     replacements = {
@@ -132,17 +136,6 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
         ".                    \\      .",
         ".                           .",
         "-----------------------------",
-        ". Damage leaderboard:       .",
-        ".                           .",
-    ])
-
-    for line in leaderboard_lines:
-        lines.append(f".{line}.")
-
-    lines.extend([
-        ".                           .",
-        f". Guild Total     {guild_str:>9} .",
-        "-----------------------------",
     ])
 
     for line in attacker_lines:
@@ -209,6 +202,13 @@ async def get_gns_total_supply():
 
 async def handle_sup_command(message: Message):
     print("Sup command detected")
+
+    # Skip messages sent before bot started
+    message_ts = message.date.replace(tzinfo=timezone.utc).timestamp()
+
+    if message_ts < BOT_START_TIME:
+        print("Ignoring stale message")
+        return  # ignore old messages
 
     user = message.from_user
     username = (
@@ -294,6 +294,41 @@ async def handle_sup_command(message: Message):
 
     await message.reply(code_block(supplarius), parse_mode="MarkdownV2")
 
+async def handle_gmud_command(message: Message):
+    message_ts = message.date.replace(tzinfo=timezone.utc).timestamp()
+    if message_ts < BOT_START_TIME:
+        print("Ignoring stale message")
+        return
+
+    data = load_data()
+    players = data.get("players", {})
+
+    if not players:
+        await message.reply(". No attacks have been recorded yet. .", parse_mode="MarkdownV2")
+        return
+
+    # Sort all players by damage descending
+    sorted_players = sorted(players.items(), key=lambda x: x[1]['damage'], reverse=True)
+
+    lines = [
+        "---------------------------",
+        ".    GMUD LEADERBOARDS    .",
+        "---------------------------",
+    ]
+
+    # Format each player: nickname and total damage
+    TOTAL_WIDTH = 27
+    for username, pdata in sorted_players:
+        nick = truncate_nickname(username, 12)  # shorter nickname to fit
+        dmg_str = f"{pdata['damage']:,}".replace(",", " ")
+        line_content = f" {nick:<12} {dmg_str:>10} "
+        lines.append(f".{line_content}.")
+
+    lines.append("---------------------------")
+
+    # Send as code block
+    leaderboard_text = code_block("\n".join(lines))
+    await message.reply(leaderboard_text, parse_mode="MarkdownV2")
 
 # ---------------------------------------------------
 # MAIN
@@ -309,9 +344,10 @@ async def main():
     dp = Dispatcher()
 
     dp.message.register(handle_sup_command, F.text.startswith("/sup"))
+    dp.message.register(handle_gmud_command, F.text.startswith("/gmud"))
 
     print("🤖 GNS Supply Boss Bot running...")
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == "__main__":
     import asyncio

@@ -10,7 +10,7 @@ SERVICE_NAME="gmud"
 # 1. Sync all files (including .env)
 # ---------------------------
 echo "📤 Syncing project files..."
-rsync -avz --exclude ".git" --exclude "venv" --exclude "__pycache__" ./ $REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR
+rsync -avz --exclude "gmud_data.json" --exclude ".git" --exclude "venv" --exclude "__pycache__" ./ $REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR
 
 # ---------------------------
 # 2. Install Python dependencies system-wide
