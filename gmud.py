@@ -205,7 +205,7 @@ async def get_gns_total_supply():
 
         except Exception as e:
             print(f"[Attempt {attempt+1}/{SUPPLY_FETCH_ATTEMPTS}] Error fetching supply: {e}")
-            if attempt < 2:
+            if attempt < SUPPLY_FETCH_ATTEMPTS - 1:
                 await asyncio.sleep(0.5)
 
     return None
