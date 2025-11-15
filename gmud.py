@@ -427,7 +427,18 @@ async def handle_burn_command(message: Message):
     SEP="----------------------------"
 
     def format_burn_line(label, burned, pct):
-        return f"{label:>{LABEL_WIDTH}}" + (" " * BEFORE_PCT) + f"({pct:>4.1f}%) {burned:>{NUM_WIDTH},}"
+        if pct < 10:
+            # two decimals, no leading space
+            pct_fmt = f"{pct:.2f}%"
+        else:
+            # one decimal, right-aligned
+            pct_fmt = f"{pct:>4.1f}%"
+
+        return (
+            f"{label:>{LABEL_WIDTH}}"
+            + (" " * BEFORE_PCT)
+            + f"({pct_fmt}) {burned:>{NUM_WIDTH},}"
+        )
 
     def format_supply_line(label, supply):
         return f"{label:>{LABEL_WIDTH}} ago" + (" " * 9) + f"{supply:>{NUM_WIDTH},}"
