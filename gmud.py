@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import re
 import time
 from datetime import timezone, datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -43,10 +44,16 @@ def code_block(text: str) -> str:
         text = text.replace(old, new)
     return "```\n" + text + "\n```"
 
+def clean_string(s):
+    # Remove emojis / surrogate pairs
+    # This regex removes characters outside the basic multilingual plane (BMP)
+    return re.sub(r'[\U00010000-\U0010FFFF]', '', s)
+
 def truncate_nickname(nickname, max_length=15):
-    if len(nickname) <= max_length:
-        return nickname
-    return nickname[:max_length - 2] + ".."
+    cleaned = clean_string(nickname)
+    if len(cleaned) <= max_length:
+        return cleaned
+    return cleaned[:max_length - 2] + ".."
 
 def generate_progress_bar(current, maximum, length=25):
     # Progress toward next million
