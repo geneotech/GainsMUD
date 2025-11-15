@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-"""
-GNS Supply Boss bot using aiogram 3.x
-"""
-
 import os
+from dotenv import load_dotenv
 import json
 import time
 from datetime import datetime
@@ -14,8 +11,15 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram import html
 
-# Configuration
-DATA_FILE = "gns_boss_data.json"
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
+
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+if not TOKEN:
+    print("Error: TELEGRAM_BOT_TOKEN not set in .env")
+    exit(1)
+
+DATA_FILE = "gmud_data.json"
 COOLDOWN_MINUTES = 30
 MAX_SUPPLY = 34_000_000
 MAX_RECENT_DAMAGES = 5

@@ -1,0 +1,40 @@
+#!/bin/bash
+set -e
+
+REMOTE_USER="ubuntu"
+REMOTE_HOST="hypersomnia.xyz"
+REMOTE_DIR="/home/ubuntu/gmud"
+SERVICE_NAME="gmud"
+
+# ---------------------------
+# 1. Sync all files (including .env)
+# ---------------------------
+echo "📤 Syncing project files..."
+rsync -avz --exclude ".git" --exclude "venv" --exclude "__pycache__" ./ $REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR
+
+# ---------------------------
+# 2. Install Python dependencies system-wide
+# ---------------------------
+ssh $REMOTE_USER@$REMOTE_HOST << 'ENDSSH'
+set -e
+cd ~/gmud
+
+sudo apt install -y python3-pip
+
+pip3 install --user --upgrade pip
+pip3 install --user aiogram httpx python-dotenv
+ENDSSH
+
+# ---------------------------
+# 3. Install systemd service
+# ---------------------------
+ssh $REMOTE_USER@$REMOTE_HOST << 'ENDSSH'
+set -e
+sudo cp ~/gmud/gmud.service /etc/systemd/system/gmud.service
+sudo systemctl daemon-reload
+sudo systemctl enable gmud
+sudo systemctl restart gmud
+ENDSSH
+
+echo "✅ Deployment complete!"
+echo "📖 Follow logs: ssh $REMOTE_USER@$REMOTE_HOST 'sudo journalctl -u gmud -f'"

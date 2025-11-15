@@ -1,0 +1,14 @@
+[Unit]
+Description=GMUD Telegram Boss Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/gmud
+ExecStart=/usr/bin/python3 -u /home/ubuntu/gmud/gmud.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
