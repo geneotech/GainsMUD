@@ -427,7 +427,7 @@ async def handle_burn_command(message: Message):
     # --- prepare header for custom periods ---
     if len(periods_to_show) == 1 and text[1].lower() not in ["1d","7d","30d","365d"]:
         days = periods_to_show[0][1]
-        header = f" Burn since {(datetime.now(timezone.utc) - timedelta(days=days)).date()}:"
+        header = f"  Burn since {(datetime.now(timezone.utc) - timedelta(days=days)).date()}:"
 
     burn_lines = [SEP, header, SEP]
     supply_lines = [SEP,f"  Supply:" + (" " * 9) + f"{today_supply:>{NUM_WIDTH},}", SEP]
