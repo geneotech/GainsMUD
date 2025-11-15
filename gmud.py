@@ -2,6 +2,7 @@
 import os
 import time
 from datetime import timezone, datetime, timedelta
+from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 import json
 import time
@@ -343,12 +344,17 @@ async def handle_gmud_command(message: Message):
         await message.reply(leaderboard_text, parse_mode="MarkdownV2")
 
 async def handle_burn_command(message: Message):
-    from datetime import timedelta, datetime, timezone
+    # Skip messages sent before bot started
+    message_ts = message.date.replace(tzinfo=timezone.utc).timestamp()
+
+    if message_ts < BOT_START_TIME:
+        print("Ignoring stale message")
+        return  # ignore old messages
 
     # --- parse argument ---
     text = message.text.strip().split()
     periods_to_show = []  # list of tuples: (label, days)
-    header = "   Burn:"
+    header = "    Burn:"
 
     if len(text) > 1:
         args = text[1].lower().split(",")
@@ -358,9 +364,13 @@ async def handle_burn_command(message: Message):
                 if arg.endswith("d"):
                     days = int(arg[:-1])
                 elif arg.endswith("m"):
-                    days = int(arg[:-1]) * 30
+                    # subtract months properly
+                    target_date = datetime.now(timezone.utc) - relativedelta(months=int(arg[:-1]))
+                    days = (datetime.now(timezone.utc).date() - target_date.date()).days
                 elif arg.endswith("y"):
-                    days = int(arg[:-1]) * 365
+                    # subtract years properly
+                    target_date = datetime.now(timezone.utc) - relativedelta(years=int(arg[:-1]))
+                    days = (datetime.now(timezone.utc).date() - target_date.date()).days
                 else:
                     # no suffix, treat as days
                     days = int(arg)
@@ -402,7 +412,7 @@ async def handle_burn_command(message: Message):
         return None
 
     # --- formatting helpers ---
-    LABEL_WIDTH = 4  # right-align period labels
+    LABEL_WIDTH = 5  # right-align period labels
     BEFORE_PCT = 5   
     NUM_WIDTH = 10
     PCT_WIDTH = 7
@@ -420,7 +430,7 @@ async def handle_burn_command(message: Message):
         header = f" Burn since {(datetime.now(timezone.utc) - timedelta(days=days)).date()}:"
 
     burn_lines = [SEP, header, SEP]
-    supply_lines = [SEP,f" Supply:" + (" " * 9) + f"{today_supply:>{NUM_WIDTH},}", SEP]
+    supply_lines = [SEP,f"  Supply:" + (" " * 9) + f"{today_supply:>{NUM_WIDTH},}", SEP]
 
     for label, days in periods_to_show:
         entry = pick_entry_by_days_strict(entries, days)
