@@ -23,6 +23,7 @@ if not TOKEN:
     print("Error: TELEGRAM_BOT_TOKEN not set in .env")
     exit(1)
 
+BACKEND_URL = "https://backend-arbitrum.gains.trade/stats"
 DATA_FILE = "gmud_data.json"
 COOLDOWN_MINUTES = 30
 MAX_SUPPLY = 34_000_000
@@ -192,7 +193,7 @@ def format_time(seconds):
     return f"{secs}s"
 
 async def get_gns_total_supply():
-    url = "https://backend-polygon.gains.trade/stats"
+    url = BACKEND_URL
 
     for attempt in range(SUPPLY_FETCH_ATTEMPTS):
         try:
@@ -386,7 +387,7 @@ async def handle_burn_command(message: Message):
     # --- fetch supply history ---
     async with httpx.AsyncClient(timeout=5) as client:
         try:
-            r = await client.get("https://backend-polygon.gains.trade/stats")
+            r = await client.get(BACKEND_URL)
             r.raise_for_status()
             entries = r.json().get("stats", [])
         except:

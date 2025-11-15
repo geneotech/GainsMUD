@@ -22,7 +22,7 @@ cd ~/gmud
 sudo apt install -y python3-pip
 
 pip3 install --user --upgrade pip
-pip3 install --user aiogram httpx python-dotenv
+pip3 install --user aiogram httpx python-dotenv python-dateutil
 ENDSSH
 
 # ---------------------------
