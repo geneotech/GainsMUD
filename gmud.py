@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
 import time
-from datetime import timezone
+from datetime import timezone, datetime, timedelta
 from dotenv import load_dotenv
 import json
 import time
@@ -26,8 +26,8 @@ DATA_FILE = "gmud_data.json"
 COOLDOWN_MINUTES = 30
 MAX_SUPPLY = 34_000_000
 MAX_RECENT_DAMAGES = 5
-SUPPLY_FETCH_ATTEMPTS=5
-SUPPLY_FETCH_SES=4
+SUPPLY_FETCH_ATTEMPTS = 5
+SUPPLY_FETCH_SES = 4
 # DEAD_WALLET_BALANCE = 311603
 DEAD_WALLET_BALANCE = 0
 DATA_LOCK = asyncio.Lock()
@@ -342,6 +342,102 @@ async def handle_gmud_command(message: Message):
         leaderboard_text = code_block("\n".join(lines))
         await message.reply(leaderboard_text, parse_mode="MarkdownV2")
 
+async def handle_burn_command(message: Message):
+    from datetime import timedelta, datetime, timezone
+
+    # --- parse argument ---
+    text = message.text.strip().split()
+    periods_to_show = []  # list of tuples: (label, days)
+    header = "   Burn:"
+
+    if len(text) > 1:
+        args = text[1].lower().split(",")
+        for arg in args:
+            try:
+                added_arg = arg
+                if arg.endswith("d"):
+                    days = int(arg[:-1])
+                elif arg.endswith("m"):
+                    days = int(arg[:-1]) * 30
+                elif arg.endswith("y"):
+                    days = int(arg[:-1]) * 365
+                else:
+                    # no suffix, treat as days
+                    days = int(arg)
+                    added_arg = arg + "d"
+                periods_to_show.append((added_arg, days))
+            except ValueError:
+                await message.reply(f"❌ Invalid number format: {arg}")
+                return
+    else:
+        # default periods
+        periods_to_show = [("1d",1), ("7d",7), ("30d",30), ("365d",365)]
+
+    # --- fetch supply history ---
+    async with httpx.AsyncClient(timeout=5) as client:
+        try:
+            r = await client.get("https://backend-polygon.gains.trade/stats")
+            r.raise_for_status()
+            entries = r.json().get("stats", [])
+        except:
+            await message.reply("❌ Failed to fetch supply history.")
+            return
+
+    if not entries:
+        await message.reply("❌ No supply history available.")
+        return
+
+    today_supply = entries[0]["token_supply"] - DEAD_WALLET_BALANCE
+
+    # --- helper: pick entry by exact date ---
+    def pick_entry_by_days_strict(entries, days: int):
+        target_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
+        for e in entries:
+            date_str = e.get("date")
+            if not date_str:
+                continue
+            entry_date = datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
+            if entry_date == target_date:
+                return e
+        return None
+
+    # --- formatting helpers ---
+    LABEL_WIDTH = 4  # right-align period labels
+    BEFORE_PCT = 5   
+    NUM_WIDTH = 10
+    PCT_WIDTH = 7
+    SEP="----------------------------"
+
+    def format_burn_line(label, burned, pct):
+        return f"{label:>{LABEL_WIDTH}}" + (" " * BEFORE_PCT) + f"({pct:>4.1f}%) {burned:>{NUM_WIDTH},}"
+
+    def format_supply_line(label, supply):
+        return f"{label:>{LABEL_WIDTH}} ago" + (" " * 9) + f"{supply:>{NUM_WIDTH},}"
+
+    # --- prepare header for custom periods ---
+    if len(periods_to_show) == 1 and text[1].lower() not in ["1d","7d","30d","365d"]:
+        days = periods_to_show[0][1]
+        header = f"Burn since {(datetime.now(timezone.utc) - timedelta(days=days)).date()}:"
+
+    burn_lines = [SEP, header, SEP]
+    supply_lines = [SEP,f" Supply:" + (" " * 9) + f"{today_supply:>{NUM_WIDTH},}", SEP]
+
+    for label, days in periods_to_show:
+        entry = pick_entry_by_days_strict(entries, days)
+        if not entry:
+            burn_lines.append(f"{label}: No data")
+            supply_lines.append(f"{label}: No data")
+            continue
+
+        old_supply = entry["token_supply"] - DEAD_WALLET_BALANCE
+        burned = old_supply - today_supply
+        pct = burned / old_supply * 100 if old_supply > 0 else 0
+
+        burn_lines.append(format_burn_line(label, burned, pct))
+        supply_lines.append(format_supply_line(label, old_supply))
+
+    await message.reply(code_block("\n".join(burn_lines + [""] + supply_lines)),
+                        parse_mode="MarkdownV2")
 # ---------------------------------------------------
 # MAIN
 # ---------------------------------------------------
@@ -357,6 +453,7 @@ async def main():
 
     dp.message.register(handle_sup_command, F.text.startswith("/sup"))
     dp.message.register(handle_gmud_command, F.text.startswith("/gmud"))
+    dp.message.register(handle_burn_command, F.text.startswith("/burn"))
 
     print("🤖 GNS Supply Boss Bot running...")
     await dp.start_polling(bot, skip_updates=True)
