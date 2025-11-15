@@ -46,9 +46,11 @@ def truncate_nickname(nickname, max_length=15):
     return nickname[:max_length - 2] + ".."
 
 def generate_progress_bar(current, maximum, length=25):
-    ratio = current / maximum
+    # Progress toward next million
+    current_million = current % 1_000_000
+    ratio = current_million / 1_000_000
     filled = int(ratio * length)
-    filled = max(filled, 1)
+    filled = min(length, filled+1) if current_million > 0 else 0
     empty = length - filled
     return "█" * filled + "-" * empty
 
@@ -112,6 +114,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
         ".[SUPPLARIUS THE DRAGONLORD].",
         ".[                         ].",
         f".{supply_line}.",
+        ".[ Until next million:     ].",
         f".[{progress_bar}].",
         ".                           .",
     ]

@@ -4,11 +4,11 @@
 import sys
 sys.path.insert(0, '.')
 
-from gns_boss_bot import format_supplarius, truncate_nickname, generate_progress_bar
+from gmud import format_supplarius, truncate_nickname, generate_progress_bar
 
 print("init")
 # Test data
-current_supply = 10_000_000
+current_supply = 27_020_000
 recent_damages = [(41880, "ja"), (20116, "bardzo dlugi nickname"), (0, "inny"), (54, "inny"), (0, "ja"), (4354, ""),(54, "")]
 last_attacker = "TestPlayer"
 last_damage = 41880
