@@ -181,7 +181,7 @@ def format_time(seconds):
     return f"{secs}s"
 
 async def get_gns_total_supply():
-    url = "https://backend-arbitrum.gains.trade/stats"
+    url = "https://backend-polygon.gains.trade/stats"
 
     for attempt in range(SUPPLY_FETCH_ATTEMPTS):
         try:
