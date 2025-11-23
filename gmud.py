@@ -64,7 +64,7 @@ def generate_progress_bar(current, maximum, length=25):
     empty = length - filled
     return "█" * filled + "-" * empty
 
-def format_supplarius(current_supply, recent_damages, last_attacker, last_damage, players):
+def format_supplarius(current_supply, recent_damages, last_attacker, last_damage, players, crossed_million=False):
     progress_bar = generate_progress_bar(current_supply, MAX_SUPPLY)
     current_str = f"{current_supply:,}".replace(",", " ")
     max_str = f"{MAX_SUPPLY:,}".replace(",", " ")
@@ -135,23 +135,89 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
         lines.append(f".{line}.")
 
     if any_effect:
-        lines.extend([
-            ".                           .",
-            ".                    ,-,-   .",
-            ".                   / / |   .",
-            ". ,-'             _/ / /    .",
-            ".(-_          _,-' `Z_/     .",
-            ". \"#:      ,-'_,-.    \\  _  .",
-            ".  #'    _(_-'_()\\     \\\" | .",
-            ".,--_,--'                 | .",
-            ". \"\"                      L-.",
-            ".,--^---v--v-._        /   \\.",
-            ". \\_________________,-'     .",
-            ".                  \\        .",
-            ".                   \\       .",
-            ".                    \\      .",
-            ".                           .",
-        ])
+        if crossed_million:
+            lines.extend([
+                ".                           .",
+                ".###########################.",
+                ".     CRITICAL ATTACK!      .",
+                ".###########################.",
+                ".     BOSS IS ENTERING      .",
+                ".     !!!NEXT STAGE!!!      .",
+                ".     !PREPARE TO DIE!      .",
+                ".###########################.",
+                ".                           .",
+                ".        ,-'         ,-,-   .",
+                ".       (-_         / / |   .",
+                ". ,-'      #:     _/ / /    .",
+                ".(-_      #'  _,-' `Z_/     .",
+                ". \"#:      ,-'_,-.    \\  _  .",
+                ".  #'    _(XX'_XX\\     \\\" | .",
+                ".,--_,--'                 | .",
+                ". \"\"                      L-.",
+                ".\------v--v-.         /   \\.",
+                ". --^--------/         |    .",
+                ". \\_________________,-'     .",
+                ".                           .",
+            ])
+        else:
+            if current_supply < 26_000_000:
+                lines.extend([
+                    ".                           .",
+                    ".      ,===:'.,             .",                    
+                    ". ,-'       `:.`---.__      .",                  
+                    ".(-_          `:.     `--.  .",                  
+                    ". \"#:          \.        `..",                  
+                    ".  #'   (,,(,    \.         .",
+                    ".    (,'     `/   \.   ,--._.",                  
+                    ".,  ,'  ,--.  `,   \.;'     .",                  
+                    ". `{D, {    \  :    \;      .",                  
+                    ".   V,,'    /  /    //      .",                  
+                    ".   j;;    /  ,' ,-//.    ,-.",                  
+                    ".   \;'   /  ,' /  _  \  /  .",                  
+                    ".         \   `'  / \  `'  /.",                  
+                    ".          `.___,'   `.__,' .",
+                    ".                           ."
+                ])
+            elif current_supply < 27_000_000:
+                lines.extend([
+                    ".                           .",
+                    ".           /           /   .",                                                    
+                    ".  ,-'     /' .,,,,  ./     .",                                           
+                    ". (-_     /';'     ,/       .",                                           
+                    ".  \"#:   / /   ,,//,`'`     .",                                           
+                    ".   #'  (_,, '_,  ,,,' ``   .",                                           
+                    ".   #   |@\__/@  ,,, ;\" `   .",                                           
+                    ". (-,  /        ,''/' `,``  .",                                           
+                    ".   - /   .     ./, `,, ` ; .",                                           
+                    ".  ,./  .   ,-,',` ,,/''\\,' .",                                           
+                    ". |   /; ./,,'`,,'' |   |   .",                                           
+                    ". |     /   ','    /    |   .",                                           
+                    ".  \\___/'   '     |     |   .",                                           
+                    ".    `,,'  |      /     `\\  .",                                           
+                    ".         /      |        ~\\.",                                           
+                    ".        '       (          .",                                           
+                    ".       :                   .",                                           
+                    ".      ; .         \--      .",                                           
+                    ".    :   \         ;        ."
+                ])
+            else:
+                lines.extend([
+                    ".                           .",
+                    ".                    ,-,-   .",
+                    ".                   / / |   .",
+                    ". ,-'             _/ / /    .",
+                    ".(-_          _,-' `Z_/     .",
+                    ". \"#:      ,-'_,-.    \\  _  .",
+                    ".  #'    _(_-'_()\\     \\\" | .",
+                    ".,--_,--'                 | .",
+                    ". \"\"                      L-.",
+                    ".,--^---v--v-._        /   \\.",
+                    ". \\_________________,-'     .",
+                    ".                  \\        .",
+                    ".                   \\       .",
+                    ".                    \\      .",
+                    ".                           .",
+                ])
 
     lines.extend([
         "-----------------------------",
@@ -265,6 +331,12 @@ async def handle_sup_command(message: Message):
             return
 
         damage = data['last_supply'] - current_supply
+        
+        # Check if we crossed a million mark downwards
+        # e.g. 30,050,000 -> 29,950,000
+        old_millions = data['last_supply'] // 1_000_000
+        new_millions = current_supply // 1_000_000
+        crossed_million = (new_millions < old_millions)
 
         # -------------------------
         # Healing logic
@@ -309,7 +381,8 @@ async def handle_sup_command(message: Message):
             data['recent_damages'],
             data['last_attacker'],
             data['last_damage'],
-            data['players']
+            data['players'],
+            crossed_million=crossed_million
         )
 
         await message.reply(code_block(supplarius), parse_mode="MarkdownV2")
