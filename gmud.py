@@ -24,7 +24,7 @@ if not TOKEN:
     print("Error: TELEGRAM_BOT_TOKEN not set in .env")
     exit(1)
 
-BACKEND_URL = "https://backend-arbitrum.gains.trade/stats"
+BACKEND_URL = "https://backend-polygon.gains.trade/stats"
 DATA_FILE = "gmud_data.json"
 COOLDOWN_MINUTES = 30
 MAX_SUPPLY = 34_000_000
