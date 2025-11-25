@@ -35,6 +35,8 @@ SUPPLY_FETCH_SES = 4
 DEAD_WALLET_BALANCE = 0
 DATA_LOCK = asyncio.Lock()
 
+extra_message_last_shown_date = None  # Track last date the extra message was shown
+
 def code_block(text: str) -> str:
     replacements = {
         '\\': '\\\\',
@@ -65,6 +67,8 @@ def generate_progress_bar(current, maximum, length=25):
     return "█" * filled + "-" * empty
 
 def format_supplarius(current_supply, recent_damages, last_attacker, last_damage, players, crossed_million=False):
+    global extra_message_last_shown_date
+
     progress_bar = generate_progress_bar(current_supply, MAX_SUPPLY)
     current_str = f"{current_supply:,}".replace(",", " ")
     max_str = f"{MAX_SUPPLY:,}".replace(",", " ")
@@ -139,14 +143,9 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
             lines.extend([
                 ".                           .",
                 ".###########################.",
-                ".     CRITICAL ATTACK!      .",
+                ".       CRITICAL HIT        .",
                 ".###########################.",
-                ".     BOSS IS ENTERING      .",
-                ".     !!!NEXT STAGE!!!      .",
-                ".                           .",
-                ".     ABANDON ALL HOPE,     .",
-                ".         YE, WHO           .",
-                ".       DARE FIGHT ME       .",
+                ".  BOSS ENTERS NEXT STAGE!  .",
                 ".###########################.",
                 ".                           .",
                 ".        ,-'         ,-,-   .",
@@ -182,6 +181,22 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
                     ".                           ."
                 ])
             elif current_supply < 27_000_000:
+                # Show extra message once per day
+                today = datetime.now(timezone.utc).date()
+                show_extra_message = (extra_message_last_shown_date is None or 
+                                     extra_message_last_shown_date != today)
+                
+                if show_extra_message:
+                    lines.extend([
+                        ".                           .",
+                        ".---------------------------.",
+                        ".     ABANDON ALL HOPE,     .",
+                        ".         YE, WHO           .",
+                        ".       DARE FIGHT ME       .",
+                        ".---------------------------.",
+                    ])
+                    extra_message_last_shown_date = today
+
                 lines.extend([
                     ".                           .",
                     ".           /           /   .",                                                    
@@ -387,6 +402,10 @@ async def handle_sup_command(message: Message):
             data['players'],
             crossed_million=crossed_million
         )
+
+        if crossed_million:
+            data['recent_damages'] = []
+            save_data(data)
 
         await message.reply(code_block(supplarius), parse_mode="MarkdownV2")
 
