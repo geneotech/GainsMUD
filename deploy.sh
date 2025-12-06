@@ -2,7 +2,7 @@
 set -e
 
 REMOTE_USER="ubuntu"
-REMOTE_HOST="hypersomnia.xyz"
+REMOTE_HOST="57.128.242.21"
 REMOTE_DIR="/home/ubuntu/gmud"
 SERVICE_NAME="gmud"
 
@@ -20,9 +20,8 @@ set -e
 cd ~/gmud
 
 sudo apt install -y python3-pip
-
-pip3 install --user --upgrade pip
-pip3 install --user aiogram httpx python-dotenv python-dateutil
+sudo apt install python3-httpx python3-requests python3-dotenv python3-dateutil
+pip3 install --break-system-packages aiogram
 ENDSSH
 
 # ---------------------------
