@@ -420,7 +420,7 @@ async def handle_gmud_command(message: Message):
         players = data.get("players", {})
 
         if not players:
-            await message.reply(". No attacks have been recorded yet. .", parse_mode="MarkdownV2")
+            await message.reply("No attacks have been recorded yet", parse_mode="MarkdownV2")
             return
 
         # Sort all players by damage descending
