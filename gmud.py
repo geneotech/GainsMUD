@@ -37,6 +37,12 @@ DATA_LOCK = asyncio.Lock()
 
 extra_message_last_shown_date = None  # Track last date the extra message was shown
 
+def boss_name(supply):
+    if supply < 26_000_000:
+        return "Serpent"
+
+    return "Dragonlord"
+
 def code_block(text: str) -> str:
     replacements = {
         '\\': '\\\\',
@@ -97,12 +103,14 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
     TOTAL_WIDTH = 27
     any_effect = True
 
+    dragon_name = boss_name(current_supply)
+
     if last_damage > 0 and last_attacker != "":
         dmg_str = f"{last_damage:,}".replace(",", " ")
         attacker_nick = truncate_nickname(last_attacker)
         attacker_lines.append(f" > {attacker_nick} deals  ".ljust(TOTAL_WIDTH))
         attacker_lines.append(f"   {dmg_str} [Fire Damage]".ljust(TOTAL_WIDTH))
-        attacker_lines.append("   to the Dragonlord.    ".ljust(TOTAL_WIDTH))
+        attacker_lines.append(f"   to the {dragon_name}.    ".ljust(TOTAL_WIDTH))
 
     elif last_damage == 0 and last_attacker != "":
         attacker_nick = truncate_nickname(last_attacker)
@@ -112,7 +120,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
 
     elif last_attacker == "" and last_damage > 0:
         heal_str = f"{last_damage:,}".replace(",", " ")
-        attacker_lines.append(" > The Dragonlord heals!  ".ljust(TOTAL_WIDTH))
+        attacker_lines.append(f" > The {dragon_name} heals!  ".ljust(TOTAL_WIDTH))
         attacker_lines.append(f"   +{heal_str} Hit Points. ".ljust(TOTAL_WIDTH))
 
     sorted_players = sorted(players.items(), key=lambda x: x[1]['damage'], reverse=True)
@@ -125,10 +133,21 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
     guild_total = sum(p['damage'] for p in players.values())
     guild_str = f"{guild_total:,}".replace(",", " ")
 
-    lines = [
-        "-----------------------------",
-        ".[SUPPLARIUS THE DRAGONLORD].",
-        ".[                         ].",
+
+    if current_supply < 26_000_000:
+        lines = [
+            "-----------------------------",
+            ".[   THE ANCIENT SERPENT   ].",
+            ".[                         ].",
+        ]
+    else:
+        lines = [
+            "-----------------------------",
+            ".[SUPPLARIUS THE DRAGONLORD].",
+            ".[                         ].",
+        ]
+
+    lines = lines + [
         f".{supply_line}.",
         ".[ Until next million:     ].",
         f".[{progress_bar}].",

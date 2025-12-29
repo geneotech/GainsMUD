@@ -47,7 +47,7 @@ print("Testing Boss Stage (crossed_million=True):")
 print("="*50)
 
 # Test data for boss stage
-boss_supply = 29_950_000
+boss_supply = 25_950_000
 boss_damages = [(40000, "Player1"),(50000, "Player1")]
 boss_attacker = "Player1"
 boss_damage = 50000
