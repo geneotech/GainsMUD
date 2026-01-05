@@ -299,11 +299,19 @@ def get_cooldown_remaining(last_attack_time):
 def format_time(seconds):
     if seconds <= 0:
         return "0s"
-    minutes = int(seconds // 60)
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
+    
+    parts = []
+    if hours > 0:
+        parts.append(f"{hours}h")
     if minutes > 0:
-        return f"{minutes}m {secs}s"
-    return f"{secs}s"
+        parts.append(f"{minutes}m")
+    if secs > 0 or not parts:
+        parts.append(f"{secs}s")
+        
+    return " ".join(parts)
 
 async def get_gns_total_supply():
     url = BACKEND_URL
