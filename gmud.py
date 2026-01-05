@@ -27,6 +27,7 @@ if not TOKEN:
 BACKEND_URL = "https://backend-polygon.gains.trade/stats"
 DATA_FILE = "gmud_data.json"
 COOLDOWN_MINUTES = 30
+GLOBAL_COOLDOWN_HOURS = 4
 MAX_SUPPLY = 34_000_000
 MAX_RECENT_DAMAGES = 5
 SUPPLY_FETCH_ATTEMPTS = 5
@@ -274,13 +275,15 @@ def load_data():
             data.setdefault('recent_damages', [])
             data.setdefault('last_attacker', "")
             data.setdefault('last_damage', 0)
+            data.setdefault('last_global_attack', None)
             return data
     return {
         "last_supply": None,
         "players": {},
         "recent_damages": [],
         "last_attacker": "",
-        "last_damage": 0
+        "last_damage": 0,
+        "last_global_attack": None
     }
 
 def save_data(data):
@@ -343,6 +346,14 @@ async def handle_sup_command(message: Message):
 
         data = load_data()
 
+        # Check global cooldown FIRST - blocks all actions
+        if data['last_global_attack'] is not None:
+            elapsed = time.time() - data['last_global_attack']
+            global_cd = max(0, GLOBAL_COOLDOWN_HOURS * 3600 - elapsed)
+            if global_cd > 0:
+                await message.reply(f"⏳ You can attack again in: *{format_time(global_cd)}*", parse_mode="Markdown")
+                return
+
         if username not in data['players']:
             data['players'][username] = {'damage': 0, 'last_attack': None}
 
@@ -377,15 +388,16 @@ async def handle_sup_command(message: Message):
 
         # -------------------------
         # Healing logic
-        # NO COOLDOWN
+        # NO PERSONAL COOLDOWN, but triggers global cooldown
         # -------------------------
         if damage < 0:
             healed = -damage
             data['recent_damages'].append((healed, ""))   # empty attacker
             data['last_attacker'] = ""
             data['last_damage'] = healed
+            data['last_global_attack'] = time.time()
 
-            # NOTE: cooldown NOT applied
+            # NOTE: personal cooldown NOT applied
             data['last_supply'] = current_supply
             save_data(data)
 
@@ -406,6 +418,7 @@ async def handle_sup_command(message: Message):
         data['last_attacker'] = username
         data['last_damage'] = damage
         player['last_attack'] = time.time()
+        data['last_global_attack'] = time.time()
 
         if damage > 0:
             player['damage'] += damage
