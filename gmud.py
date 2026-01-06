@@ -73,7 +73,7 @@ def generate_progress_bar(current, maximum, length=25):
     empty = length - filled
     return "█" * filled + "-" * empty
 
-def format_supplarius(current_supply, recent_damages, last_attacker, last_damage, players, crossed_million=False):
+def format_supplarius(current_supply, recent_damages, last_attacker, last_damage, players, crossed_million=False, from_status=False):
     global extra_message_last_shown_date
 
     progress_bar = generate_progress_bar(current_supply, MAX_SUPPLY)
@@ -206,7 +206,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
                 show_extra_message = (extra_message_last_shown_date is None or 
                                      extra_message_last_shown_date != today)
                 
-                if show_extra_message:
+                if show_extra_message and not from_status:
                     lines.extend([
                         ".                           .",
                         ".---------------------------.",
@@ -257,12 +257,13 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
                     ".                           .",
                 ])
 
-    lines.extend([
-        "-----------------------------",
-    ])
+    if not from_status:
+        lines.extend([
+            "-----------------------------",
+        ])
 
-    for line in attacker_lines:
-        lines.append(f".{line}.")
+        for line in attacker_lines:
+            lines.append(f".{line}.")
 
     lines.append("-----------------------------")
 
@@ -606,6 +607,64 @@ async def handle_burn_command(message: Message):
 # MAIN
 # ---------------------------------------------------
 
+async def handle_drag_command(message: Message):
+    async with DATA_LOCK:
+        # Skip messages sent before bot started
+        message_ts = message.date.replace(tzinfo=timezone.utc).timestamp()
+        if message_ts < BOT_START_TIME:
+            return
+
+        user = message.from_user
+        username = (
+            user.full_name
+            or user.first_name
+            or user.username
+            or f"User{user.id}"
+        )
+
+        data = load_data()
+
+        if username not in data['players']:
+            data['players'][username] = {'damage': 0, 'last_attack': None}
+
+        player = data['players'][username]
+
+        # Check per-user cooldown
+        cd = get_cooldown_remaining(player['last_attack'])
+        if cd > 0:
+            await message.reply(f"⏳ You can check status again in: *{format_time(cd)}*", parse_mode="Markdown")
+            return
+
+        current_supply = await get_gns_total_supply()
+        if current_supply is None:
+            await message.reply("❌ Failed to fetch GNS supply. Try again later.")
+            return
+
+        # Trigger per-user cooldown
+        player['last_attack'] = time.time()
+        
+        if data['last_supply'] is None:
+            data['last_supply'] = current_supply
+            save_data(data)
+            await message.reply(
+                f"🎮 *BOSS BATTLE STATUS*\n\n🐉 HP: *{current_supply:,}*",
+                parse_mode="Markdown"
+            )
+            return
+            
+        save_data(data)
+
+        supplarius = format_supplarius(
+            current_supply,
+            data['recent_damages'],
+            data['last_attacker'],
+            data['last_damage'],
+            data['players'],
+            crossed_million=False,
+            from_status=True
+        )
+        await message.reply(code_block(supplarius), parse_mode="MarkdownV2")
+
 async def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -616,6 +675,7 @@ async def main():
     dp = Dispatcher()
 
     dp.message.register(handle_sup_command, F.text.startswith("/sup"))
+    dp.message.register(handle_drag_command, F.text.startswith("/drag"))
     dp.message.register(handle_gmud_command, F.text.startswith("/gmud"))
     dp.message.register(handle_burn_command, F.text.startswith("/burn"))
 

@@ -62,3 +62,6 @@ print("="*50)
 
 result_normal = format_supplarius(boss_supply, boss_damages, boss_attacker, boss_damage, boss_players, crossed_million=False)
 print(result_normal)
+
+result_normal = format_supplarius(boss_supply, boss_damages, boss_attacker, boss_damage, boss_players, crossed_million=False, from_status=True)
+print(result_normal)
