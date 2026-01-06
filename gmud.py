@@ -207,7 +207,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
                 show_extra_message = (extra_message_last_shown_date is None or 
                                      extra_message_last_shown_date != today)
                 
-                if show_extra_message and not from_status:
+                if False and show_extra_message and not from_status:
                     lines.extend([
                         ".                           .",
                         ".---------------------------.",
