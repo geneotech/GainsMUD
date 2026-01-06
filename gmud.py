@@ -28,13 +28,14 @@ BACKEND_URL = "https://backend-polygon.gains.trade/stats"
 DATA_FILE = "gmud_data.json"
 COOLDOWN_MINUTES = 30
 GLOBAL_COOLDOWN_HOURS = 1.5
-MAX_SUPPLY = 34_000_000
+MAX_SUPPLY = 38_892_000
 MAX_RECENT_DAMAGES = 5
 SUPPLY_FETCH_ATTEMPTS = 5
 SUPPLY_FETCH_SES = 4
 # DEAD_WALLET_BALANCE = 311603
 DEAD_WALLET_BALANCE = 0
 DATA_LOCK = asyncio.Lock()
+ALLOWED_CHAT_USERNAME = "GainsPriceChat"
 
 extra_message_last_shown_date = None  # Track last date the extra message was shown
 
@@ -345,6 +346,10 @@ async def handle_sup_command(message: Message):
             print("Ignoring stale message")
             return  # ignore old messages
 
+        if message.chat.username != ALLOWED_CHAT_USERNAME:
+            await message.reply("⚠️ This command can only be used in @GainsPriceChat")
+            return
+
         user = message.from_user
         username = (
             user.full_name
@@ -367,11 +372,6 @@ async def handle_sup_command(message: Message):
             data['players'][username] = {'damage': 0, 'last_attack': None}
 
         player = data['players'][username]
-
-        cd = get_cooldown_remaining(player['last_attack'])
-        if cd > 0:
-            await message.reply(f"⏳ You can attack again in: *{format_time(cd)}*", parse_mode="Markdown")
-            return
 
         current_supply = await get_gns_total_supply()
         if current_supply is None:
@@ -614,6 +614,10 @@ async def handle_drag_command(message: Message):
         if message_ts < BOT_START_TIME:
             return
 
+        if message.chat.username == ALLOWED_CHAT_USERNAME:
+            await message.reply("⚠️ DM bot directly to check dragon status, to avoid spam.\nAttack here with /sup.")
+            return
+
         user = message.from_user
         username = (
             user.full_name
@@ -629,11 +633,12 @@ async def handle_drag_command(message: Message):
 
         player = data['players'][username]
 
-        # Check per-user cooldown
-        cd = get_cooldown_remaining(player['last_attack'])
-        if cd > 0:
-            await message.reply(f"⏳ You can check status again in: *{format_time(cd)}*", parse_mode="Markdown")
-            return
+        if message.chat.username == ALLOWED_CHAT_USERNAME:
+            # Check per-user cooldown
+            cd = get_cooldown_remaining(player['last_attack'])
+            if cd > 0:
+                await message.reply(f"⏳ You can check status again in: *{format_time(cd)}*", parse_mode="Markdown")
+                return
 
         current_supply = await get_gns_total_supply()
         if current_supply is None:
