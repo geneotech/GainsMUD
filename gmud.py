@@ -546,14 +546,25 @@ async def handle_burn_command(message: Message):
     # --- helper: pick entry by exact date ---
     def pick_entry_by_days_strict(entries, days: int):
         target_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
+
+        latest_entry = None
+        latest_dt = None
+
         for e in entries:
             date_str = e.get("date")
             if not date_str:
                 continue
-            entry_date = datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
-            if entry_date == target_date:
-                return e
-        return None
+
+            entry_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+
+            if entry_dt.date() != target_date:
+                continue
+
+            if latest_dt is None or entry_dt > latest_dt:
+                latest_dt = entry_dt
+                latest_entry = e
+
+        return latest_entry
 
     # --- formatting helpers ---
     LABEL_WIDTH = 5  # right-align period labels
