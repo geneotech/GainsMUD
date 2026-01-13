@@ -487,7 +487,13 @@ async def handle_gmud_command(message: Message):
         leaderboard_text = code_block("\n".join(lines))
         await message.reply(leaderboard_text, parse_mode="MarkdownV2")
 
-async def handle_burn_command(message: Message):
+async def _handle_burn_impl(message: Message, cumulative: bool):
+    """Shared implementation for /burn and /burnd commands.
+    
+    Args:
+        message: The Telegram message
+        cumulative: If True, show burn since a day (cumulative). If False, show burn on a day (daily).
+    """
     # Skip messages sent before bot started
     message_ts = message.date.replace(tzinfo=timezone.utc).timestamp()
 
@@ -498,12 +504,31 @@ async def handle_burn_command(message: Message):
     # --- parse argument ---
     text = message.text.strip().split()
     periods_to_show = []  # list of tuples: (label, days)
-    header = "    Burn:"
+    header = "    Burn:" if cumulative else "  Burn days ago (non-cumul.):"
 
     if len(text) > 1:
         args = text[1].lower().split(",")
         for arg in args:
             try:
+                # Check for range syntax (e.g., "1-7") - only for numeric values
+                if "-" in arg and not arg.endswith("d") and not arg.endswith("m") and not arg.endswith("y"):
+                    parts = arg.split("-")
+                    if len(parts) == 2:
+                        start = int(parts[0])
+                        end = int(parts[1])
+                        end = min(start + 31, end)
+                        if start > end:
+                            await message.reply(f"❌ Invalid range: {arg} (start must be <= end)")
+                            return
+                        for day in range(start, end + 1):
+                            period = f"{day}d"
+
+                            if day == 0:
+                                period = "Today"
+
+                            periods_to_show.append((period, day))
+                        continue
+                
                 added_arg = arg
                 if arg.endswith("d"):
                     days = int(arg[:-1])
@@ -525,7 +550,10 @@ async def handle_burn_command(message: Message):
                 return
     else:
         # default periods
-        periods_to_show = [("1d",1), ("7d",7), ("30d",30), ("365d",365)]
+        if cumulative:
+            periods_to_show = [("1d",1), ("7d",7), ("30d",30), ("365d",365)]
+        else:
+            periods_to_show = [("Today",0), ("1d",1), ("2d",2), ("3d",3), ("4d",4),("5d",5),("6d",6),("7d",7),("8d",8),("9d",9)]
 
     # --- fetch supply history ---
     async with httpx.AsyncClient(timeout=5) as client:
@@ -570,7 +598,6 @@ async def handle_burn_command(message: Message):
     LABEL_WIDTH = 5  # right-align period labels
     BEFORE_PCT = 5   
     NUM_WIDTH = 10
-    PCT_WIDTH = 7
     SEP="----------------------------"
 
     def format_burn_line(label, burned, pct):
@@ -590,30 +617,77 @@ async def handle_burn_command(message: Message):
     def format_supply_line(label, supply):
         return f"{label:>{LABEL_WIDTH}} ago" + (" " * 9) + f"{supply:>{NUM_WIDTH},}"
 
-    # --- prepare header for custom periods ---
-    if len(periods_to_show) == 1 and text[1].lower() not in ["1d","7d","30d","365d"]:
+    # --- prepare header for custom periods (cumulative only) ---
+    if cumulative and len(periods_to_show) == 1 and text[1].lower() not in ["1d","7d","30d","365d"]:
         days = periods_to_show[0][1]
         header = f"  Burn since {(datetime.now(timezone.utc) - timedelta(days=days)).date()}:"
 
     burn_lines = [SEP, header, SEP]
-    supply_lines = [SEP,f"  Supply:" + (" " * 9) + f"{today_supply:>{NUM_WIDTH},}", SEP]
+    
+    if cumulative:
+        supply_lines = [SEP,f"  Supply:" + (" " * 9) + f"{today_supply:>{NUM_WIDTH},}", SEP]
+    
+    total_burned = 0
+    total_pct = 0
+    count = 0
 
     for label, days in periods_to_show:
-        entry = pick_entry_by_days_strict(entries, days)
-        if not entry:
-            burn_lines.append(f"{label}: No data")
-            supply_lines.append(f"{label}: No data")
-            continue
+        if cumulative:
+            # Cumulative burn: from that day until now
+            entry = pick_entry_by_days_strict(entries, days)
+            if not entry:
+                burn_lines.append(f"{label}: No data")
+                supply_lines.append(f"{label}: No data")
+                continue
 
-        old_supply = entry["token_supply"] - DEAD_WALLET_BALANCE
-        burned = old_supply - today_supply
-        pct = burned / old_supply * 100 if old_supply > 0 else 0
+            old_supply = entry["token_supply"] - DEAD_WALLET_BALANCE
+            burned = old_supply - today_supply
+            pct = burned / old_supply * 100 if old_supply > 0 else 0
 
-        burn_lines.append(format_burn_line(label, burned, pct))
-        supply_lines.append(format_supply_line(label, old_supply))
+            burn_lines.append(format_burn_line(label, burned, pct))
+            supply_lines.append(format_supply_line(label, old_supply))
+        else:
+            # Daily burn: on that specific day
+            entry_day = pick_entry_by_days_strict(entries, days)
+            entry_day_before = pick_entry_by_days_strict(entries, days + 1)
+            
+            if not entry_day or not entry_day_before:
+                burn_lines.append(f"{label}: No data")
+                continue
 
-    await message.reply(code_block("\n".join(burn_lines + [""] + supply_lines)),
-                        parse_mode="MarkdownV2")
+            supply_day = entry_day["token_supply"] - DEAD_WALLET_BALANCE
+            supply_day_before = entry_day_before["token_supply"] - DEAD_WALLET_BALANCE
+            
+            # Burn ON that day = supply at day before - supply at that day
+            burned_on_day = supply_day_before - supply_day
+            pct = burned_on_day / supply_day_before * 100 if supply_day_before > 0 else 0
+
+            burn_lines.append(format_burn_line(label, burned_on_day, pct))
+
+            total_burned += burned_on_day
+            total_pct += pct
+            count += 1
+
+
+    if not cumulative and count > 0:
+        avg_burned = total_burned / count
+        avg_pct = total_pct / count
+
+        burn_lines.append("")
+        burn_lines.append(format_burn_line("Avg", int(avg_burned), avg_pct))
+
+    if cumulative:
+        await message.reply(code_block("\n".join(burn_lines + [""] + supply_lines)),
+                            parse_mode="MarkdownV2")
+    else:
+        await message.reply(code_block("\n".join(burn_lines)),
+                            parse_mode="MarkdownV2")
+
+async def handle_burn_command(message: Message):
+    await _handle_burn_impl(message, cumulative=True)
+
+async def handle_burnd_command(message: Message):
+    await _handle_burn_impl(message, cumulative=False)
 # ---------------------------------------------------
 # MAIN
 # ---------------------------------------------------
@@ -693,7 +767,8 @@ async def main():
     dp.message.register(handle_sup_command, F.text.startswith("/sup"))
     dp.message.register(handle_drag_command, F.text.startswith("/drag"))
     dp.message.register(handle_gmud_command, F.text.startswith("/gmud"))
-    dp.message.register(handle_burn_command, F.text.startswith("/burn"))
+    dp.message.register(handle_burnd_command, Command("burnd"))
+    dp.message.register(handle_burn_command, Command("burn"))
 
     print("🤖 GNS Supply Boss Bot running...")
     await dp.start_polling(bot, skip_updates=True)
