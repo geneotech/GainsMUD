@@ -516,7 +516,7 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
                     if len(parts) == 2:
                         start = int(parts[0])
                         end = int(parts[1])
-                        end = min(start + 31, end)
+                        end = min(start + 400, end)
                         if start > end:
                             await message.reply(f"❌ Invalid range: {arg} (start must be <= end)")
                             return
