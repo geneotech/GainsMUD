@@ -522,10 +522,6 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
                             return
                         for day in range(start, end + 1):
                             period = f"{day}d"
-
-                            if day == 0:
-                                period = "Today"
-
                             periods_to_show.append((period, day))
                         continue
                 
@@ -632,6 +628,9 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
     count = 0
 
     for label, days in periods_to_show:
+        if label == "0d":
+            label = "Today"
+
         if cumulative:
             # Cumulative burn: from that day until now
             entry = pick_entry_by_days_strict(entries, days)
