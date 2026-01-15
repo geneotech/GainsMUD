@@ -265,13 +265,14 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
 
                 lines = lines + add_lines
 
-    if not from_status:
-        lines.extend([
-            "-----------------------------",
-        ])
+    if False:
+        if not from_status:
+            lines.extend([
+                "-----------------------------",
+            ])
 
-        for line in attacker_lines:
-            lines.append(f".{line}.")
+            for line in attacker_lines:
+                lines.append(f".{line}.")
 
     lines.append("-----------------------------")
 
