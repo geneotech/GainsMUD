@@ -29,7 +29,7 @@ DATA_FILE = "gmud_data.json"
 COOLDOWN_MINUTES = 30
 GLOBAL_COOLDOWN_HOURS = 1.5
 MAX_SUPPLY = 38_892_000
-MAX_RECENT_DAMAGES = 5
+MAX_RECENT_DAMAGES = 3
 SUPPLY_FETCH_ATTEMPTS = 5
 SUPPLY_FETCH_SES = 4
 # DEAD_WALLET_BALANCE = 311603
@@ -107,23 +107,24 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
 
     dragon_name = boss_name(current_supply)
 
-    if last_damage > 0 and last_attacker != "":
-        dmg_str = f"{last_damage:,}".replace(",", " ")
-        attacker_nick = truncate_nickname(last_attacker)
-        attacker_lines.append(f" > {attacker_nick} deals  ".ljust(TOTAL_WIDTH))
-        attacker_lines.append(f"   {dmg_str} [Fire Damage]".ljust(TOTAL_WIDTH))
-        attacker_lines.append(f"   to the {dragon_name}.    ".ljust(TOTAL_WIDTH))
+    if False:
+        if last_damage > 0 and last_attacker != "":
+            dmg_str = f"{last_damage:,}".replace(",", " ")
+            attacker_nick = truncate_nickname(last_attacker)
+            attacker_lines.append(f" > {attacker_nick} deals  ".ljust(TOTAL_WIDTH))
+            attacker_lines.append(f"   {dmg_str} [Fire Damage]".ljust(TOTAL_WIDTH))
+            attacker_lines.append(f"   to the {dragon_name}.    ".ljust(TOTAL_WIDTH))
 
-    elif last_damage == 0 and last_attacker != "":
-        attacker_nick = truncate_nickname(last_attacker)
-        attacker_lines.append(f" > {attacker_nick} misses!".ljust(TOTAL_WIDTH))
-        attacker_lines.append("   Attack had no effect! ".ljust(TOTAL_WIDTH))
-        any_effect = False
+        elif last_damage == 0 and last_attacker != "":
+            attacker_nick = truncate_nickname(last_attacker)
+            attacker_lines.append(f" > {attacker_nick} misses!".ljust(TOTAL_WIDTH))
+            attacker_lines.append("   Attack had no effect! ".ljust(TOTAL_WIDTH))
+            any_effect = False
 
-    elif last_attacker == "" and last_damage > 0:
-        heal_str = f"{last_damage:,}".replace(",", " ")
-        attacker_lines.append(f" > The {dragon_name} heals!  ".ljust(TOTAL_WIDTH))
-        attacker_lines.append(f"   +{heal_str} Hit Points. ".ljust(TOTAL_WIDTH))
+        elif last_attacker == "" and last_damage > 0:
+            heal_str = f"{last_damage:,}".replace(",", " ")
+            attacker_lines.append(f" > The {dragon_name} heals!  ".ljust(TOTAL_WIDTH))
+            attacker_lines.append(f"   +{heal_str} Hit Points. ".ljust(TOTAL_WIDTH))
 
     sorted_players = sorted(players.items(), key=lambda x: x[1]['damage'], reverse=True)
     leaderboard_lines = []
@@ -151,7 +152,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
 
     lines = lines + [
         f".{supply_line}.",
-        ".[ Until next million:     ].",
+        # ".[ Until next million:     ].",
         f".[{progress_bar}].",
         ".                           .",
     ]
@@ -184,7 +185,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
             ])
         else:
             if current_supply < 26_000_000:
-                lines.extend([
+                add_lines = [
                     ".                           .",
                     ".      ,===:'.,             .",                    
                     ". ,-'       `:.`---.__      .",                  
@@ -200,7 +201,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
                     ".         \   `'  / \  `'  /.",                  
                     ".          `.___,'   `.__,' .",
                     ".                           ."
-                ])
+                ]
             elif current_supply < 27_000_000:
                 # Show extra message once per day
                 today = datetime.now(timezone.utc).date()
@@ -218,7 +219,7 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
                     ])
                     extra_message_last_shown_date = today
 
-                lines.extend([
+                add_lines = [
                     ".                           .",
                     ".           /           /   .",                                                    
                     ".  ,-'     /' .,,,,  ./     .",                                           
@@ -238,9 +239,9 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
                     ".       :                   .",                                           
                     ".      ; .         \--      .",                                           
                     ".    :   \         ;        ."
-                ])
+                ]
             else:
-                lines.extend([
+                add_lines = [
                     ".                           .",
                     ".                    ,-,-   .",
                     ".                   / / |   .",
@@ -256,7 +257,13 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
                     ".                   \\       .",
                     ".                    \\      .",
                     ".                           .",
-                ])
+                ]
+
+            if last_damage > 0:
+                n_lines = 1 + (last_damage // 500)
+                add_lines = add_lines[:n_lines]
+
+                lines = lines + add_lines
 
     if not from_status:
         lines.extend([
