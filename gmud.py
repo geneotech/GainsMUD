@@ -35,6 +35,8 @@ SUPPLY_FETCH_SES = 4
 # DEAD_WALLET_BALANCE = 311603
 DEAD_WALLET_BALANCE = 0
 DATA_LOCK = asyncio.Lock()
+MAX_BURN_DISPLAY_LINES = 20  # Maximum lines to display before truncating (shows first 10, ..., last 10)
+TRUNCATION_INDICATOR = "  (...)"
 ALLOWED_CHAT_USERNAME = "GainsPriceChat"
 
 extra_message_last_shown_date = None  # Track last date the extra message was shown
@@ -515,42 +517,71 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
     header = "  Burnt over duration:" if cumulative else "  Burn each day (days ago):"
     is_range = False  # Track if a range was specified
 
+    def parse_value_to_days(val: str) -> tuple:
+        """Parse a value with optional suffix (d/w/m/y) to days.
+        Returns (label, days) tuple or raises ValueError if invalid."""
+        val = val.strip()
+        if val.endswith("d"):
+            days = int(val[:-1])
+            return (val, days)
+        elif val.endswith("w"):
+            weeks = int(val[:-1])
+            days = weeks * 7
+            return (val, days)
+        elif val.endswith("m"):
+            months = int(val[:-1])
+            target_date = datetime.now(timezone.utc) - relativedelta(months=months)
+            days = (datetime.now(timezone.utc).date() - target_date.date()).days
+            return (val, days)
+        elif val.endswith("y"):
+            years = int(val[:-1])
+            target_date = datetime.now(timezone.utc) - relativedelta(years=years)
+            days = (datetime.now(timezone.utc).date() - target_date.date()).days
+            return (val, days)
+        else:
+            # no suffix, treat as days
+            days = int(val)
+            return (val + "d", days)
+
     if len(text) > 1:
         args = text[1].lower().split(",")
+        
+        # Check if single value argument without comma/dash → treat as range 0-(N-1)
+        # Support suffixed values like "2w" → range 0 to 13 (2 weeks - 1)
+        if len(args) == 1 and "-" not in args[0]:
+            try:
+                _, num_days = parse_value_to_days(args[0])
+                if num_days > 0:
+                    is_range = True
+                    # Treat as range from 0 to (num_days - 1)
+                    for day in range(0, num_days):
+                        period = f"{day}d"
+                        periods_to_show.append((period, day))
+                    args = []  # Clear args to skip the loop below
+            except ValueError:
+                pass  # Not a valid value, continue with normal processing
+        
         for arg in args:
             try:
-                # Check for range syntax (e.g., "1-7") - only for numeric values
-                if "-" in arg and not arg.endswith("d") and not arg.endswith("m") and not arg.endswith("y"):
+                # Check for range syntax (e.g., "1-7" or "1w-2w")
+                if "-" in arg:
                     is_range = True
                     parts = arg.split("-")
                     if len(parts) == 2:
-                        start = int(parts[0])
-                        end = int(parts[1])
-                        end = min(start + 400, end)
-                        if start > end:
+                        _, start_days = parse_value_to_days(parts[0])
+                        _, end_days = parse_value_to_days(parts[1])
+                        if start_days > end_days:
                             await message.reply(f"❌ Invalid range: {arg} (start must be <= end)")
                             return
-                        for day in range(start, end + 1):
+                        # Range is exclusive of end (e.g., 1w-2w = days 7-13, not 7-14)
+                        for day in range(start_days, end_days):
                             period = f"{day}d"
                             periods_to_show.append((period, day))
                         continue
                 
-                added_arg = arg
-                if arg.endswith("d"):
-                    days = int(arg[:-1])
-                elif arg.endswith("m"):
-                    # subtract months properly
-                    target_date = datetime.now(timezone.utc) - relativedelta(months=int(arg[:-1]))
-                    days = (datetime.now(timezone.utc).date() - target_date.date()).days
-                elif arg.endswith("y"):
-                    # subtract years properly
-                    target_date = datetime.now(timezone.utc) - relativedelta(years=int(arg[:-1]))
-                    days = (datetime.now(timezone.utc).date() - target_date.date()).days
-                else:
-                    # no suffix, treat as days
-                    days = int(arg)
-                    added_arg = arg + "d"
-                periods_to_show.append((added_arg, days))
+                # Single value with suffix
+                label, days = parse_value_to_days(arg)
+                periods_to_show.append((label, days))
             except ValueError:
                 await message.reply(f"❌ Invalid number format: {arg}")
                 return
@@ -614,7 +645,13 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
     SEP="----------------------------"
 
     def format_burn_line(label, burned, pct):
-        if pct < 10:
+        if pct < 0:
+            # Negative: use one less decimal to account for minus sign
+            if pct > -10:
+                pct_fmt = f"{pct:.1f}%"
+            else:
+                pct_fmt = f"{pct:>4.0f}%"
+        elif pct < 10:
             # two decimals, no leading space
             pct_fmt = f"{pct:.2f}%"
         else:
@@ -643,6 +680,13 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
     total_burned = 0
     total_pct = 0
     count = 0
+    max_burned = 0
+    max_burned_pct = 0
+    max_burned_date = None
+    
+    # Collect all data entries first (for truncation)
+    data_burn_lines = []
+    data_supply_lines = []  # Only used for cumulative
 
     for label, days in periods_to_show:
         if not cumulative:
@@ -655,23 +699,23 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             # Cumulative burn: from that day until now
             entry = pick_entry_by_days_strict(entries, days)
             if not entry:
-                burn_lines.append(f"{label}: No data")
-                supply_lines.append(f"{label}: No data")
+                data_burn_lines.append(f"{label}: No data")
+                data_supply_lines.append(f"{label}: No data")
                 continue
 
             old_supply = entry["token_supply"] - DEAD_WALLET_BALANCE
             burned = old_supply - today_supply
             pct = burned / old_supply * 100 if old_supply > 0 else 0
 
-            burn_lines.append(format_burn_line(label, burned, pct))
-            supply_lines.append(format_supply_line(label, old_supply))
+            data_burn_lines.append(format_burn_line(label, burned, pct))
+            data_supply_lines.append(format_supply_line(label, old_supply))
         else:
             # Daily burn: on that specific day
             entry_day = pick_entry_by_days_strict(entries, days)
             entry_day_before = pick_entry_by_days_strict(entries, days + 1)
             
             if not entry_day or not entry_day_before:
-                burn_lines.append(f"{label}: No data")
+                data_burn_lines.append(f"{label}: No data")
                 continue
 
             supply_day = entry_day["token_supply"] - DEAD_WALLET_BALANCE
@@ -681,11 +725,31 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             burned_on_day = supply_day_before - supply_day
             pct = burned_on_day / supply_day_before * 100 if supply_day_before > 0 else 0
 
-            burn_lines.append(format_burn_line(label, burned_on_day, pct))
+            data_burn_lines.append(format_burn_line(label, burned_on_day, pct))
+
+            # Track max burn (always, even if truncated in display)
+            if burned_on_day > max_burned:
+                max_burned = burned_on_day
+                max_burned_pct = pct
+                # Calculate the date for this day
+                max_burned_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
 
             total_burned += burned_on_day
             total_pct += pct
             count += 1
+
+    # Apply truncation: show first N, (...), last N if total exceeds MAX_BURN_DISPLAY_LINES
+    def apply_truncation(lines):
+        """Truncate list to show first and last portions with (...) in between."""
+        if len(lines) <= MAX_BURN_DISPLAY_LINES:
+            return lines
+        first_count = MAX_BURN_DISPLAY_LINES // 2  # 10
+        last_count = MAX_BURN_DISPLAY_LINES - first_count  # 10
+        return lines[:first_count] + [TRUNCATION_INDICATOR] + lines[-last_count:]
+    
+    burn_lines.extend(apply_truncation(data_burn_lines))
+    if cumulative:
+        supply_lines.extend(apply_truncation(data_supply_lines))
 
 
     if not cumulative and count > 0:
@@ -707,6 +771,14 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
         total_str = f"{int(total_burned):,}"
         padding = LABEL_WIDTH + BEFORE_PCT + 8 + NUM_WIDTH - len(days_text)  # 8 for "(pct%) "
         burn_lines.append(" " * padding + days_text)
+        
+        # Show Max line with the highest burn day
+        if max_burned > 0 and max_burned_date:
+            burn_lines.append(format_burn_line("Max", int(max_burned), max_burned_pct))
+            # Add date in parentheses
+            date_text = f"(on {max_burned_date})"
+            padding = LABEL_WIDTH + BEFORE_PCT + 8 + NUM_WIDTH - len(date_text)
+            burn_lines.append(" " * padding + date_text)
 
     if cumulative:
         await message.reply(code_block("\n".join(burn_lines + [""] + supply_lines)),
