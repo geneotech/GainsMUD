@@ -35,8 +35,7 @@ SUPPLY_FETCH_SES = 4
 # DEAD_WALLET_BALANCE = 311603
 DEAD_WALLET_BALANCE = 0
 DATA_LOCK = asyncio.Lock()
-MAX_BURN_DISPLAY_DAYS = 365  # Maximum number of days that can be displayed in /burn command
-MAX_BURN_DISPLAY_LINES = 20  # Maximum lines to display before truncating with (...)
+MAX_BURN_DISPLAY_LINES = 20  # Maximum lines to display before truncating (shows first 10, ..., last 10)
 TRUNCATION_INDICATOR = "  (...)"
 ALLOWED_CHAT_USERNAME = "GainsPriceChat"
 
@@ -528,8 +527,7 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
                 if num_days > 0:
                     is_range = True
                     # Treat as range from 0 to (num_days - 1)
-                    end = min(num_days - 1, MAX_BURN_DISPLAY_DAYS - 1)
-                    for day in range(0, end + 1):
+                    for day in range(0, num_days):
                         period = f"{day}d"
                         periods_to_show.append((period, day))
                     args = []  # Clear args to skip the loop below
@@ -545,7 +543,6 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
                     if len(parts) == 2:
                         start = int(parts[0])
                         end = int(parts[1])
-                        end = min(start + MAX_BURN_DISPLAY_DAYS, end)
                         if start > end:
                             await message.reply(f"❌ Invalid range: {arg} (start must be <= end)")
                             return
@@ -665,8 +662,10 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
     max_burned = 0
     max_burned_pct = 0
     max_burned_date = None
-    displayed_count = 0
-    truncated = False
+    
+    # Collect all data entries first (for truncation)
+    data_burn_lines = []
+    data_supply_lines = []  # Only used for cumulative
 
     for label, days in periods_to_show:
         if not cumulative:
@@ -679,40 +678,23 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             # Cumulative burn: from that day until now
             entry = pick_entry_by_days_strict(entries, days)
             if not entry:
-                if displayed_count < MAX_BURN_DISPLAY_LINES:
-                    burn_lines.append(f"{label}: No data")
-                    supply_lines.append(f"{label}: No data")
-                    displayed_count += 1
-                elif not truncated:
-                    burn_lines.append(TRUNCATION_INDICATOR)
-                    supply_lines.append(TRUNCATION_INDICATOR)
-                    truncated = True
+                data_burn_lines.append(f"{label}: No data")
+                data_supply_lines.append(f"{label}: No data")
                 continue
 
             old_supply = entry["token_supply"] - DEAD_WALLET_BALANCE
             burned = old_supply - today_supply
             pct = burned / old_supply * 100 if old_supply > 0 else 0
 
-            if displayed_count < MAX_BURN_DISPLAY_LINES:
-                burn_lines.append(format_burn_line(label, burned, pct))
-                supply_lines.append(format_supply_line(label, old_supply))
-                displayed_count += 1
-            elif not truncated:
-                burn_lines.append(TRUNCATION_INDICATOR)
-                supply_lines.append(TRUNCATION_INDICATOR)
-                truncated = True
+            data_burn_lines.append(format_burn_line(label, burned, pct))
+            data_supply_lines.append(format_supply_line(label, old_supply))
         else:
             # Daily burn: on that specific day
             entry_day = pick_entry_by_days_strict(entries, days)
             entry_day_before = pick_entry_by_days_strict(entries, days + 1)
             
             if not entry_day or not entry_day_before:
-                if displayed_count < MAX_BURN_DISPLAY_LINES:
-                    burn_lines.append(f"{label}: No data")
-                    displayed_count += 1
-                elif not truncated:
-                    burn_lines.append(TRUNCATION_INDICATOR)
-                    truncated = True
+                data_burn_lines.append(f"{label}: No data")
                 continue
 
             supply_day = entry_day["token_supply"] - DEAD_WALLET_BALANCE
@@ -722,14 +704,9 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             burned_on_day = supply_day_before - supply_day
             pct = burned_on_day / supply_day_before * 100 if supply_day_before > 0 else 0
 
-            if displayed_count < MAX_BURN_DISPLAY_LINES:
-                burn_lines.append(format_burn_line(label, burned_on_day, pct))
-                displayed_count += 1
-            elif not truncated:
-                burn_lines.append(TRUNCATION_INDICATOR)
-                truncated = True
+            data_burn_lines.append(format_burn_line(label, burned_on_day, pct))
 
-            # Track max burn (always, even if truncated)
+            # Track max burn (always, even if truncated in display)
             if burned_on_day > max_burned:
                 max_burned = burned_on_day
                 max_burned_pct = pct
@@ -739,6 +716,18 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             total_burned += burned_on_day
             total_pct += pct
             count += 1
+
+    # Apply truncation: show first 10, (...), last 10 if needed
+    def apply_truncation(lines):
+        if len(lines) <= MAX_BURN_DISPLAY_LINES:
+            return lines
+        first_half = MAX_BURN_DISPLAY_LINES // 2  # 10
+        last_half = MAX_BURN_DISPLAY_LINES - first_half  # 10
+        return lines[:first_half] + [TRUNCATION_INDICATOR] + lines[-last_half:]
+    
+    burn_lines.extend(apply_truncation(data_burn_lines))
+    if cumulative:
+        supply_lines.extend(apply_truncation(data_supply_lines))
 
 
     if not cumulative and count > 0:
