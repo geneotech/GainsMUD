@@ -517,13 +517,40 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
     header = "  Burnt over duration:" if cumulative else "  Burn each day (days ago):"
     is_range = False  # Track if a range was specified
 
+    def parse_value_to_days(val: str) -> tuple:
+        """Parse a value with optional suffix (d/w/m/y) to days.
+        Returns (label, days) tuple or raises ValueError if invalid."""
+        val = val.strip()
+        if val.endswith("d"):
+            days = int(val[:-1])
+            return (val, days)
+        elif val.endswith("w"):
+            weeks = int(val[:-1])
+            days = weeks * 7
+            return (val, days)
+        elif val.endswith("m"):
+            months = int(val[:-1])
+            target_date = datetime.now(timezone.utc) - relativedelta(months=months)
+            days = (datetime.now(timezone.utc).date() - target_date.date()).days
+            return (val, days)
+        elif val.endswith("y"):
+            years = int(val[:-1])
+            target_date = datetime.now(timezone.utc) - relativedelta(years=years)
+            days = (datetime.now(timezone.utc).date() - target_date.date()).days
+            return (val, days)
+        else:
+            # no suffix, treat as days
+            days = int(val)
+            return (val + "d", days)
+
     if len(text) > 1:
         args = text[1].lower().split(",")
         
-        # Check if single number argument without comma/dash → treat as range 0-(N-1)
-        if len(args) == 1 and "-" not in args[0] and not args[0].endswith("d") and not args[0].endswith("m") and not args[0].endswith("y"):
+        # Check if single value argument without comma/dash → treat as range 0-(N-1)
+        # Support suffixed values like "2w" → range 0 to 13 (2 weeks - 1)
+        if len(args) == 1 and "-" not in args[0]:
             try:
-                num_days = int(args[0])
+                _, num_days = parse_value_to_days(args[0])
                 if num_days > 0:
                     is_range = True
                     # Treat as range from 0 to (num_days - 1)
@@ -532,41 +559,28 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
                         periods_to_show.append((period, day))
                     args = []  # Clear args to skip the loop below
             except ValueError:
-                pass  # Not a valid number, continue with normal processing
+                pass  # Not a valid value, continue with normal processing
         
         for arg in args:
             try:
-                # Check for range syntax (e.g., "1-7") - only for numeric values
-                if "-" in arg and not arg.endswith("d") and not arg.endswith("m") and not arg.endswith("y"):
+                # Check for range syntax (e.g., "1-7" or "1w-2w")
+                if "-" in arg:
                     is_range = True
                     parts = arg.split("-")
                     if len(parts) == 2:
-                        start = int(parts[0])
-                        end = int(parts[1])
-                        if start > end:
+                        _, start_days = parse_value_to_days(parts[0])
+                        _, end_days = parse_value_to_days(parts[1])
+                        if start_days > end_days:
                             await message.reply(f"❌ Invalid range: {arg} (start must be <= end)")
                             return
-                        for day in range(start, end + 1):
+                        for day in range(start_days, end_days + 1):
                             period = f"{day}d"
                             periods_to_show.append((period, day))
                         continue
                 
-                added_arg = arg
-                if arg.endswith("d"):
-                    days = int(arg[:-1])
-                elif arg.endswith("m"):
-                    # subtract months properly
-                    target_date = datetime.now(timezone.utc) - relativedelta(months=int(arg[:-1]))
-                    days = (datetime.now(timezone.utc).date() - target_date.date()).days
-                elif arg.endswith("y"):
-                    # subtract years properly
-                    target_date = datetime.now(timezone.utc) - relativedelta(years=int(arg[:-1]))
-                    days = (datetime.now(timezone.utc).date() - target_date.date()).days
-                else:
-                    # no suffix, treat as days
-                    days = int(arg)
-                    added_arg = arg + "d"
-                periods_to_show.append((added_arg, days))
+                # Single value with suffix
+                label, days = parse_value_to_days(arg)
+                periods_to_show.append((label, days))
             except ValueError:
                 await message.reply(f"❌ Invalid number format: {arg}")
                 return
