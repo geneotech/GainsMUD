@@ -573,7 +573,8 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
                         if start_days > end_days:
                             await message.reply(f"❌ Invalid range: {arg} (start must be <= end)")
                             return
-                        for day in range(start_days, end_days + 1):
+                        # Range is exclusive of end (e.g., 1w-2w = days 7-13, not 7-14)
+                        for day in range(start_days, end_days):
                             period = f"{day}d"
                             periods_to_show.append((period, day))
                         continue
@@ -644,7 +645,13 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
     SEP="----------------------------"
 
     def format_burn_line(label, burned, pct):
-        if pct < 10:
+        if pct < 0:
+            # Negative: use one less decimal to account for minus sign
+            if pct > -10:
+                pct_fmt = f"{pct:.1f}%"
+            else:
+                pct_fmt = f"{pct:>4.0f}%"
+        elif pct < 10:
             # two decimals, no leading space
             pct_fmt = f"{pct:.2f}%"
         else:
