@@ -717,13 +717,14 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             total_pct += pct
             count += 1
 
-    # Apply truncation: show first 10, (...), last 10 if needed
+    # Apply truncation: show first N, (...), last N if total exceeds MAX_BURN_DISPLAY_LINES
     def apply_truncation(lines):
+        """Truncate list to show first and last portions with (...) in between."""
         if len(lines) <= MAX_BURN_DISPLAY_LINES:
             return lines
-        first_half = MAX_BURN_DISPLAY_LINES // 2  # 10
-        last_half = MAX_BURN_DISPLAY_LINES - first_half  # 10
-        return lines[:first_half] + [TRUNCATION_INDICATOR] + lines[-last_half:]
+        first_count = MAX_BURN_DISPLAY_LINES // 2  # 10
+        last_count = MAX_BURN_DISPLAY_LINES - first_count  # 10
+        return lines[:first_count] + [TRUNCATION_INDICATOR] + lines[-last_count:]
     
     burn_lines.extend(apply_truncation(data_burn_lines))
     if cumulative:
