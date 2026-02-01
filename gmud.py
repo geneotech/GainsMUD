@@ -496,11 +496,11 @@ async def handle_gmud_command(message: Message):
         await message.reply(leaderboard_text, parse_mode="MarkdownV2")
 
 async def _handle_burn_impl(message: Message, cumulative: bool):
-    """Shared implementation for /burn and /burnd commands.
+    """Shared implementation for /burn and /burnt commands.
     
     Args:
         message: The Telegram message
-        cumulative: If True, show burn since a day (cumulative). If False, show burn on a day (daily).
+        cumulative: If True, show burn since a day (cumulative /burnt). If False, show burn on a day (daily /burn).
     """
     # Skip messages sent before bot started
     message_ts = message.date.replace(tzinfo=timezone.utc).timestamp()
@@ -512,7 +512,8 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
     # --- parse argument ---
     text = message.text.strip().split()
     periods_to_show = []  # list of tuples: (label, days)
-    header = "    Burn:" if cumulative else "  Burn days ago (non-cumul.):"
+    header = "  Burnt over duration:" if cumulative else "  Burn each day (days ago):"
+    is_range = False  # Track if a range was specified
 
     if len(text) > 1:
         args = text[1].lower().split(",")
@@ -520,6 +521,7 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             try:
                 # Check for range syntax (e.g., "1-7") - only for numeric values
                 if "-" in arg and not arg.endswith("d") and not arg.endswith("m") and not arg.endswith("y"):
+                    is_range = True
                     parts = arg.split("-")
                     if len(parts) == 2:
                         start = int(parts[0])
@@ -558,6 +560,13 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             periods_to_show = [("1d",1), ("7d",7), ("30d",30), ("365d",365)]
         else:
             periods_to_show = [("Today",0), ("1d",1), ("2d",2), ("3d",3), ("4d",4),("5d",5),("6d",6),("7d",7),("8d",8),("9d",9)]
+    
+    # --- Validate /burnt doesn't use 0 ---
+    if cumulative:
+        for label, days in periods_to_show:
+            if days == 0:
+                await message.reply("❌ Cannot show cumulative burn for 0 days. Use /burn 0 for today's burn.")
+                return
 
     # --- fetch supply history ---
     async with httpx.AsyncClient(timeout=5) as client:
@@ -636,8 +645,11 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
     count = 0
 
     for label, days in periods_to_show:
-        if label == "0d":
-            label = "Today"
+        if not cumulative:
+            if label == "0d":
+                label = "Today"
+            if label == "1d":
+                label = "Ystdy"
 
         if cumulative:
             # Cumulative burn: from that day until now
@@ -681,7 +693,20 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
         avg_pct = total_pct / count
 
         burn_lines.append("")
+        
+        # Always show Avg first
         burn_lines.append(format_burn_line("Avg", int(avg_burned), avg_pct))
+        
+        # Always show Tot line (for any /burn command)
+        burn_lines.append(format_burn_line("Tot", int(total_burned), total_pct))
+        # Add "(over x days)" right-aligned to the total number
+        days_text = f"(over {count} days)"
+        # Calculate position: align to end of the number in previous line
+        # Format: "  Tot     (pct%) total_burned"
+        # We want to align days_text to end at same position as total_burned
+        total_str = f"{int(total_burned):,}"
+        padding = LABEL_WIDTH + BEFORE_PCT + 8 + NUM_WIDTH - len(days_text)  # 8 for "(pct%) "
+        burn_lines.append(" " * padding + days_text)
 
     if cumulative:
         await message.reply(code_block("\n".join(burn_lines + [""] + supply_lines)),
@@ -690,11 +715,17 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
         await message.reply(code_block("\n".join(burn_lines)),
                             parse_mode="MarkdownV2")
 
-async def handle_burn_command(message: Message):
+async def handle_burnt_command(message: Message):
+    """Handle /burnt command - shows cumulative burn since a specific day."""
     await _handle_burn_impl(message, cumulative=True)
 
-async def handle_burnd_command(message: Message):
+async def handle_burn_command(message: Message):
+    """Handle /burn command - shows daily burn on specific days."""
     await _handle_burn_impl(message, cumulative=False)
+
+async def handle_burnd_command(message: Message):
+    """Handle deprecated /burnd command - redirect to /burn with message."""
+    await message.reply("/burnd has been renamed to just /burn.\nUse /burnt for cumulative burn.")
 # ---------------------------------------------------
 # MAIN
 # ---------------------------------------------------
@@ -774,7 +805,8 @@ async def main():
     dp.message.register(handle_sup_command, F.text.startswith("/sup"))
     dp.message.register(handle_drag_command, F.text.startswith("/drag"))
     dp.message.register(handle_gmud_command, F.text.startswith("/gmud"))
-    dp.message.register(handle_burnd_command, Command("burnd"))
+    dp.message.register(handle_burnd_command, Command("burnd"))  # deprecated, shows message
+    dp.message.register(handle_burnt_command, Command("burnt"))
     dp.message.register(handle_burn_command, Command("burn"))
 
     print("🤖 GNS Supply Boss Bot running...")
