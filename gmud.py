@@ -35,6 +35,7 @@ SUPPLY_FETCH_SES = 4
 # DEAD_WALLET_BALANCE = 311603
 DEAD_WALLET_BALANCE = 0
 DATA_LOCK = asyncio.Lock()
+MAX_BURN_DISPLAY_DAYS = 365  # Maximum number of days that can be displayed in /burn command
 ALLOWED_CHAT_USERNAME = "GainsPriceChat"
 
 extra_message_last_shown_date = None  # Track last date the extra message was shown
@@ -517,6 +518,22 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
 
     if len(text) > 1:
         args = text[1].lower().split(",")
+        
+        # Check if single number argument without comma/dash → treat as range 0-(N-1)
+        if len(args) == 1 and "-" not in args[0] and not args[0].endswith("d") and not args[0].endswith("m") and not args[0].endswith("y"):
+            try:
+                num_days = int(args[0])
+                if num_days > 0:
+                    is_range = True
+                    # Treat as range from 0 to (num_days - 1)
+                    end = min(num_days - 1, MAX_BURN_DISPLAY_DAYS - 1)
+                    for day in range(0, end + 1):
+                        period = f"{day}d"
+                        periods_to_show.append((period, day))
+                    args = []  # Clear args to skip the loop below
+            except ValueError:
+                pass  # Not a valid number, continue with normal processing
+        
         for arg in args:
             try:
                 # Check for range syntax (e.g., "1-7") - only for numeric values
@@ -526,7 +543,7 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
                     if len(parts) == 2:
                         start = int(parts[0])
                         end = int(parts[1])
-                        end = min(start + 400, end)
+                        end = min(start + MAX_BURN_DISPLAY_DAYS, end)
                         if start > end:
                             await message.reply(f"❌ Invalid range: {arg} (start must be <= end)")
                             return
@@ -643,6 +660,12 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
     total_burned = 0
     total_pct = 0
     count = 0
+    max_burned = 0
+    max_burned_pct = 0
+    max_burned_date = None
+    displayed_count = 0
+    truncated = False
+    MAX_DISPLAY_LINES = 20  # Maximum lines to display before truncating
 
     for label, days in periods_to_show:
         if not cumulative:
@@ -655,23 +678,40 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             # Cumulative burn: from that day until now
             entry = pick_entry_by_days_strict(entries, days)
             if not entry:
-                burn_lines.append(f"{label}: No data")
-                supply_lines.append(f"{label}: No data")
+                if displayed_count < MAX_DISPLAY_LINES:
+                    burn_lines.append(f"{label}: No data")
+                    supply_lines.append(f"{label}: No data")
+                    displayed_count += 1
+                elif not truncated:
+                    burn_lines.append("  (...)")
+                    supply_lines.append("  (...)")
+                    truncated = True
                 continue
 
             old_supply = entry["token_supply"] - DEAD_WALLET_BALANCE
             burned = old_supply - today_supply
             pct = burned / old_supply * 100 if old_supply > 0 else 0
 
-            burn_lines.append(format_burn_line(label, burned, pct))
-            supply_lines.append(format_supply_line(label, old_supply))
+            if displayed_count < MAX_DISPLAY_LINES:
+                burn_lines.append(format_burn_line(label, burned, pct))
+                supply_lines.append(format_supply_line(label, old_supply))
+                displayed_count += 1
+            elif not truncated:
+                burn_lines.append("  (...)")
+                supply_lines.append("  (...)")
+                truncated = True
         else:
             # Daily burn: on that specific day
             entry_day = pick_entry_by_days_strict(entries, days)
             entry_day_before = pick_entry_by_days_strict(entries, days + 1)
             
             if not entry_day or not entry_day_before:
-                burn_lines.append(f"{label}: No data")
+                if displayed_count < MAX_DISPLAY_LINES:
+                    burn_lines.append(f"{label}: No data")
+                    displayed_count += 1
+                elif not truncated:
+                    burn_lines.append("  (...)")
+                    truncated = True
                 continue
 
             supply_day = entry_day["token_supply"] - DEAD_WALLET_BALANCE
@@ -681,7 +721,19 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             burned_on_day = supply_day_before - supply_day
             pct = burned_on_day / supply_day_before * 100 if supply_day_before > 0 else 0
 
-            burn_lines.append(format_burn_line(label, burned_on_day, pct))
+            if displayed_count < MAX_DISPLAY_LINES:
+                burn_lines.append(format_burn_line(label, burned_on_day, pct))
+                displayed_count += 1
+            elif not truncated:
+                burn_lines.append("  (...)")
+                truncated = True
+
+            # Track max burn (always, even if truncated)
+            if burned_on_day > max_burned:
+                max_burned = burned_on_day
+                max_burned_pct = pct
+                # Calculate the date for this day
+                max_burned_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
 
             total_burned += burned_on_day
             total_pct += pct
@@ -707,6 +759,14 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
         total_str = f"{int(total_burned):,}"
         padding = LABEL_WIDTH + BEFORE_PCT + 8 + NUM_WIDTH - len(days_text)  # 8 for "(pct%) "
         burn_lines.append(" " * padding + days_text)
+        
+        # Show Max line with the highest burn day
+        if max_burned > 0 and max_burned_date:
+            burn_lines.append(format_burn_line("Max", int(max_burned), max_burned_pct))
+            # Add date in parentheses
+            date_text = f"(on {max_burned_date})"
+            padding = LABEL_WIDTH + BEFORE_PCT + 8 + NUM_WIDTH - len(date_text)
+            burn_lines.append(" " * padding + date_text)
 
     if cumulative:
         await message.reply(code_block("\n".join(burn_lines + [""] + supply_lines)),
