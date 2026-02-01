@@ -36,6 +36,8 @@ SUPPLY_FETCH_SES = 4
 DEAD_WALLET_BALANCE = 0
 DATA_LOCK = asyncio.Lock()
 MAX_BURN_DISPLAY_DAYS = 365  # Maximum number of days that can be displayed in /burn command
+MAX_BURN_DISPLAY_LINES = 20  # Maximum lines to display before truncating with (...)
+TRUNCATION_INDICATOR = "  (...)"
 ALLOWED_CHAT_USERNAME = "GainsPriceChat"
 
 extra_message_last_shown_date = None  # Track last date the extra message was shown
@@ -665,7 +667,6 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
     max_burned_date = None
     displayed_count = 0
     truncated = False
-    MAX_DISPLAY_LINES = 20  # Maximum lines to display before truncating
 
     for label, days in periods_to_show:
         if not cumulative:
@@ -678,13 +679,13 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             # Cumulative burn: from that day until now
             entry = pick_entry_by_days_strict(entries, days)
             if not entry:
-                if displayed_count < MAX_DISPLAY_LINES:
+                if displayed_count < MAX_BURN_DISPLAY_LINES:
                     burn_lines.append(f"{label}: No data")
                     supply_lines.append(f"{label}: No data")
                     displayed_count += 1
                 elif not truncated:
-                    burn_lines.append("  (...)")
-                    supply_lines.append("  (...)")
+                    burn_lines.append(TRUNCATION_INDICATOR)
+                    supply_lines.append(TRUNCATION_INDICATOR)
                     truncated = True
                 continue
 
@@ -692,13 +693,13 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             burned = old_supply - today_supply
             pct = burned / old_supply * 100 if old_supply > 0 else 0
 
-            if displayed_count < MAX_DISPLAY_LINES:
+            if displayed_count < MAX_BURN_DISPLAY_LINES:
                 burn_lines.append(format_burn_line(label, burned, pct))
                 supply_lines.append(format_supply_line(label, old_supply))
                 displayed_count += 1
             elif not truncated:
-                burn_lines.append("  (...)")
-                supply_lines.append("  (...)")
+                burn_lines.append(TRUNCATION_INDICATOR)
+                supply_lines.append(TRUNCATION_INDICATOR)
                 truncated = True
         else:
             # Daily burn: on that specific day
@@ -706,11 +707,11 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             entry_day_before = pick_entry_by_days_strict(entries, days + 1)
             
             if not entry_day or not entry_day_before:
-                if displayed_count < MAX_DISPLAY_LINES:
+                if displayed_count < MAX_BURN_DISPLAY_LINES:
                     burn_lines.append(f"{label}: No data")
                     displayed_count += 1
                 elif not truncated:
-                    burn_lines.append("  (...)")
+                    burn_lines.append(TRUNCATION_INDICATOR)
                     truncated = True
                 continue
 
@@ -721,11 +722,11 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             burned_on_day = supply_day_before - supply_day
             pct = burned_on_day / supply_day_before * 100 if supply_day_before > 0 else 0
 
-            if displayed_count < MAX_DISPLAY_LINES:
+            if displayed_count < MAX_BURN_DISPLAY_LINES:
                 burn_lines.append(format_burn_line(label, burned_on_day, pct))
                 displayed_count += 1
             elif not truncated:
-                burn_lines.append("  (...)")
+                burn_lines.append(TRUNCATION_INDICATOR)
                 truncated = True
 
             # Track max burn (always, even if truncated)
