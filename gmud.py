@@ -35,7 +35,7 @@ SUPPLY_FETCH_SES = 4
 # DEAD_WALLET_BALANCE = 311603
 DEAD_WALLET_BALANCE = 0
 DATA_LOCK = asyncio.Lock()
-MAX_BURN_DISPLAY_LINES = 20  # Maximum lines to display before truncating (shows first 10, ..., last 10)
+MAX_BURN_DISPLAY_LINES = 100  # Maximum lines to display before truncating (shows first 10, ..., last 10)
 TRUNCATION_INDICATOR = "  (...)"
 ALLOWED_CHAT_USERNAME = "GainsPriceChat"
 
@@ -774,6 +774,7 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
         
         # Show Max line with the highest burn day
         if max_burned > 0 and max_burned_date:
+            burn_lines.append("")
             burn_lines.append(format_burn_line("Max", int(max_burned), max_burned_pct))
             # Add date in parentheses
             date_text = f"(on {max_burned_date})"
