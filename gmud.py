@@ -14,6 +14,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram import html
+from scrap import get_gns_amount
 
 BOT_START_TIME = time.time()
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
@@ -38,6 +39,7 @@ DATA_LOCK = asyncio.Lock()
 MAX_BURN_DISPLAY_LINES = 100  # Maximum lines to display before truncating (shows first 10, ..., last 10)
 TRUNCATION_INDICATOR = "  (...)"
 ALLOWED_CHAT_USERNAME = "GainsPriceChat"
+WHALE_START_AMOUNT = 300000  # Starting GNS balance for the whale boss
 
 extra_message_last_shown_date = None  # Track last date the extra message was shown
 
@@ -280,6 +282,117 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
 
     return "\n".join(lines)
 
+def format_whale(current_gns, recent_damages, last_attacker, last_damage, players, show_full=False, defeated=False):
+    """Format the whale boss display.
+    
+    Args:
+        current_gns: Current GNS balance of the whale
+        recent_damages: List of recent damage tuples (damage, attacker)
+        last_attacker: Username of last attacker
+        last_damage: Last damage dealt
+        players: Player damage dictionary
+        show_full: If True, show full whale (for first attack)
+        defeated: If True, show victory message
+    """
+    # Round to int for display
+    current_gns = int(current_gns)
+    current_str = f"{current_gns:,}".replace(",", " ")
+    start_str = f"{WHALE_START_AMOUNT:,}".replace(",", " ")
+    gns_line = f"[{current_str:>11} /{start_str:>11} ]"
+    
+    # Progress bar (reversed - fills as whale loses GNS)
+    ratio = max(0, (current_gns / WHALE_START_AMOUNT))
+    filled = int(ratio * 25)
+    filled = min(25, filled)
+    empty = 25 - filled
+    progress_bar = "█" * filled + "-" * empty
+    
+    damage_lines = []
+    for dmg, attacker in recent_damages[-MAX_RECENT_DAMAGES:]:
+        if dmg == 0:
+            nick = truncate_nickname(attacker, 12)
+            line = f"      <miss>  {nick:<12} "
+            damage_lines.append(line.ljust(27))
+        elif attacker == "":
+            # Healing event (shouldn't happen for whale, but keep for consistency)
+            heal_str = f"+{int(dmg):,}".replace(",", " ")
+            line = f"{heal_str}               "
+            damage_lines.append(line.rjust(27))
+        else:
+            dmg_str = f"{int(dmg):,}".replace(",", " ")
+            nick = truncate_nickname(attacker, 12)
+            line = f"-{dmg_str}  {nick:<12} "
+            damage_lines.append(line.rjust(27))
+    
+    lines = [
+        "-----------------------------",
+        ".[        THE WHALE        ].",
+        ".[                         ].",
+        f".{gns_line}.",
+        f".[{progress_bar}].",
+        ".                           .",
+    ]
+    
+    # Show "Fight start!" if there are damages
+    if damage_lines:
+        lines.append(".      Fight start!         .")
+    
+    for line in reversed(damage_lines):
+        lines.append(f".{line}.")
+    
+    if defeated:
+        # Victory message
+        lines.extend([
+            ".                           .",
+            ".###########################.",
+            ".   WE HAVE DEFEATED THE    .",
+            ".          WHALE!           .",
+            ".###########################.",
+            ".                           .",
+            ".   ______...----..____..-'`.",
+            ". ,'.                       .",
+            ".:                          .",
+            ".|                       -- .",
+            ".|               X.X      -..",
+            ".:                 __       .",
+            ". `._________     (  `.   -..",
+            ".    `-------------\   \_.--.",
+            ".                   `--'    .",
+            ".                           .",
+        ])
+    else:
+        # Show whale ASCII art
+        if show_full or last_damage > 0:
+            # TODO: Replace this placeholder with custom whale ASCII art
+            # The number of lines shown should be proportional to damage
+            # For now, using a simple placeholder
+            whale_art = [
+                ".                           .",
+                ".   ______...----..____..-'`.",
+                ". ,'.                       .",
+                ".:                          .",
+                ".|                       -- .",
+                ".|               -.-      -..",
+                ".:                 __       .",
+                ". `._________     (  `.   -..",
+                ".    `-------------\   \_.--.",
+                ".                   `--'    .",
+                ".                           .",
+            ]
+            
+            if show_full:
+                # Show entire whale on first attack
+                lines.extend(whale_art)
+            else:
+                # Show proportional whale based on damage
+                n_lines = min(len(whale_art), 1 + int(last_damage / 1000))
+                lines.extend(whale_art[:n_lines])
+    
+    lines.append("-----------------------------")
+    
+    return "\n".join(lines)
+
+
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, 'r') as f:
@@ -288,6 +401,13 @@ def load_data():
             data.setdefault('last_attacker', "")
             data.setdefault('last_damage', 0)
             data.setdefault('last_global_attack', None)
+            # Whale-specific fields
+            data.setdefault('whale_last_supply', None)
+            data.setdefault('whale_recent_damages', [])
+            data.setdefault('whale_last_attacker', "")
+            data.setdefault('whale_last_damage', 0)
+            data.setdefault('whale_last_global_attack', None)
+            data.setdefault('whale_first_attack', True)
             return data
     return {
         "last_supply": None,
@@ -295,7 +415,14 @@ def load_data():
         "recent_damages": [],
         "last_attacker": "",
         "last_damage": 0,
-        "last_global_attack": None
+        "last_global_attack": None,
+        # Whale-specific fields
+        "whale_last_supply": None,
+        "whale_recent_damages": [],
+        "whale_last_attacker": "",
+        "whale_last_damage": 0,
+        "whale_last_global_attack": None,
+        "whale_first_attack": True
     }
 
 def save_data(data):
@@ -344,6 +471,22 @@ async def get_gns_total_supply():
                 await asyncio.sleep(0.5)
 
     return None
+
+async def get_whale_gns():
+    """Fetch whale's GNS balance from web scraper."""
+    try:
+        # Run the blocking Selenium scraper in a thread pool
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, get_gns_amount)
+        
+        if result is None:
+            return None
+        
+        # Parse the string result to float
+        return float(result)
+    except Exception as e:
+        print(f"Error fetching whale GNS: {e}")
+        return None
 
 async def handle_sup_command(message: Message):
     async with DATA_LOCK:
@@ -866,6 +1009,92 @@ async def handle_drag_command(message: Message):
         )
         await message.reply(code_block(supplarius), parse_mode="MarkdownV2")
 
+async def handle_wha_command(message: Message):
+    async with DATA_LOCK:
+        print("Wha command detected")
+
+        # Skip messages sent before bot started
+        message_ts = message.date.replace(tzinfo=timezone.utc).timestamp()
+
+        if message_ts < BOT_START_TIME:
+            print("Ignoring stale message")
+            return  # ignore old messages
+
+        if message.chat.username != ALLOWED_CHAT_USERNAME:
+            await message.reply("⚠️ This command can only be used in @GainsPriceChat")
+            return
+
+        user = message.from_user
+        username = (
+            user.full_name
+            or user.first_name
+            or user.username
+            or f"User{user.id}"
+        )
+
+        data = load_data()
+
+        # Check whale-specific global cooldown FIRST - blocks all actions
+        if data['whale_last_global_attack'] is not None:
+            elapsed = time.time() - data['whale_last_global_attack']
+            global_cd = max(0, GLOBAL_COOLDOWN_HOURS * 3600 - elapsed)
+            if global_cd > 0:
+                await message.reply(f"⏳ You can attack the whale again in: *{format_time(global_cd)}*", parse_mode="Markdown")
+                return
+
+        if username not in data['players']:
+            data['players'][username] = {'damage': 0, 'last_attack': None}
+
+        player = data['players'][username]
+
+        current_whale_gns = await get_whale_gns()
+        if current_whale_gns is None:
+            await message.reply("❌ Failed to fetch whale GNS balance. Try again later.")
+            return
+
+        # Check if whale is defeated
+        defeated = current_whale_gns <= 0
+
+        if data['whale_last_supply'] is None:
+            # First time initialization
+            data['whale_last_supply'] = current_whale_gns
+            data['whale_first_attack'] = True
+            save_data(data)
+            await message.reply(
+                f"🎮 *WHALE BOSS BATTLE INITIALIZED!*\n\n🐋 GNS: *{current_whale_gns:,.2f}*\nAttack again to deal damage!",
+                parse_mode="Markdown"
+            )
+            return
+
+        damage = data['whale_last_supply'] - current_whale_gns
+        
+        # Normal attack logic
+        data['whale_recent_damages'].append((damage, username))
+        data['whale_last_attacker'] = username
+        data['whale_last_damage'] = damage
+        data['whale_last_global_attack'] = time.time()
+
+        if damage > 0:
+            player['damage'] += damage
+
+        show_full = data['whale_first_attack']
+        data['whale_first_attack'] = False
+        data['whale_last_supply'] = current_whale_gns
+        save_data(data)
+
+        whale_display = format_whale(
+            current_whale_gns,
+            data['whale_recent_damages'],
+            data['whale_last_attacker'],
+            data['whale_last_damage'],
+            data['players'],
+            show_full=show_full,
+            defeated=defeated
+        )
+
+        await message.reply(code_block(whale_display), parse_mode="MarkdownV2")
+
+
 async def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -876,6 +1105,7 @@ async def main():
     dp = Dispatcher()
 
     dp.message.register(handle_sup_command, F.text.startswith("/sup"))
+    dp.message.register(handle_wha_command, F.text.startswith("/wha"))
     dp.message.register(handle_drag_command, F.text.startswith("/drag"))
     dp.message.register(handle_gmud_command, F.text.startswith("/gmud"))
     dp.message.register(handle_burnd_command, Command("burnd"))  # deprecated, shows message
