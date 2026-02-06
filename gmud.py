@@ -78,6 +78,65 @@ def generate_progress_bar(current, maximum, length=25):
     empty = length - filled
     return "█" * filled + "-" * empty
 
+def get_latest_entry_for_date(entries, target_date):
+    """Find the latest entry for a specific date by timestamp.
+    
+    API may return entries in inconsistent order, so we need to find
+    the entry with the latest timestamp for the given date.
+    
+    Args:
+        entries: List of entry dicts with 'date' and 'token_supply' fields
+        target_date: A date object to match entries against
+    
+    Returns:
+        The entry dict with the latest timestamp for the target date, or None if not found
+    """
+    latest_entry = None
+    latest_dt = None
+
+    for e in entries:
+        date_str = e.get("date")
+        if not date_str:
+            continue
+
+        entry_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+
+        if entry_dt.date() != target_date:
+            continue
+
+        if latest_dt is None or entry_dt > latest_dt:
+            latest_dt = entry_dt
+            latest_entry = e
+
+    return latest_entry
+
+
+def get_overall_latest_entry(entries):
+    """Find the entry with the most recent timestamp overall.
+    
+    Args:
+        entries: List of entry dicts with 'date' and 'token_supply' fields
+    
+    Returns:
+        The entry dict with the latest timestamp, or None if no valid entries
+    """
+    latest_entry = None
+    latest_dt = None
+
+    for e in entries:
+        date_str = e.get("date")
+        if not date_str:
+            continue
+
+        entry_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+
+        if latest_dt is None or entry_dt > latest_dt:
+            latest_dt = entry_dt
+            latest_entry = e
+
+    return latest_entry
+
+
 def format_supplarius(current_supply, recent_damages, last_attacker, last_damage, players, crossed_million=False, from_status=False):
     global extra_message_last_shown_date
 
@@ -484,36 +543,17 @@ async def get_gns_total_supply():
                 data = resp.json()
                 if data and 'stats' in data and len(data['stats']) > 0:
                     entries = data['stats']
-                    # Find the latest entry for today by timestamp (API may return in inconsistent order)
-                    # Also track the overall latest entry as fallback
                     today = datetime.now(timezone.utc).date()
-                    today_latest_entry = None
-                    today_latest_dt = None
-                    overall_latest_entry = None
-                    overall_latest_dt = None
-                    
-                    for e in entries:
-                        date_str = e.get("date")
-                        if not date_str:
-                            continue
-                        entry_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                        
-                        # Track overall latest
-                        if overall_latest_dt is None or entry_dt > overall_latest_dt:
-                            overall_latest_dt = entry_dt
-                            overall_latest_entry = e
-                        
-                        # Track today's latest
-                        if entry_dt.date() == today:
-                            if today_latest_dt is None or entry_dt > today_latest_dt:
-                                today_latest_dt = entry_dt
-                                today_latest_entry = e
                     
                     # Prefer today's latest, fallback to overall latest, then first entry
-                    if today_latest_entry:
-                        return today_latest_entry['token_supply'] - DEAD_WALLET_BALANCE
-                    if overall_latest_entry:
-                        return overall_latest_entry['token_supply'] - DEAD_WALLET_BALANCE
+                    today_entry = get_latest_entry_for_date(entries, today)
+                    if today_entry:
+                        return today_entry['token_supply'] - DEAD_WALLET_BALANCE
+                    
+                    overall_entry = get_overall_latest_entry(entries)
+                    if overall_entry:
+                        return overall_entry['token_supply'] - DEAD_WALLET_BALANCE
+                    
                     return entries[0]['token_supply'] - DEAD_WALLET_BALANCE
                 return None
 
@@ -808,47 +848,16 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
         await message.reply("❌ No supply history available.")
         return
 
-    # --- helper: pick entry by exact date ---
-    def pick_entry_by_days_strict(entries, days: int):
-        target_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
-
-        latest_entry = None
-        latest_dt = None
-
-        for e in entries:
-            date_str = e.get("date")
-            if not date_str:
-                continue
-
-            entry_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-
-            if entry_dt.date() != target_date:
-                continue
-
-            if latest_dt is None or entry_dt > latest_dt:
-                latest_dt = entry_dt
-                latest_entry = e
-
-        return latest_entry
-
-    # Get today's supply using the latest entry for today (not just entries[0])
-    today_entry = pick_entry_by_days_strict(entries, 0)
+    # Get today's supply using the latest entry for today
+    today = datetime.now(timezone.utc).date()
+    today_entry = get_latest_entry_for_date(entries, today)
     if today_entry:
         today_supply = today_entry["token_supply"] - DEAD_WALLET_BALANCE
     else:
         # Fallback: find the most recent entry by timestamp if no entry for today
-        latest_entry = None
-        latest_dt = None
-        for e in entries:
-            date_str = e.get("date")
-            if not date_str:
-                continue
-            entry_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-            if latest_dt is None or entry_dt > latest_dt:
-                latest_dt = entry_dt
-                latest_entry = e
-        if latest_entry:
-            today_supply = latest_entry["token_supply"] - DEAD_WALLET_BALANCE
+        overall_entry = get_overall_latest_entry(entries)
+        if overall_entry:
+            today_supply = overall_entry["token_supply"] - DEAD_WALLET_BALANCE
         else:
             today_supply = entries[0]["token_supply"] - DEAD_WALLET_BALANCE
 
@@ -909,9 +918,11 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             if label == "1d":
                 label = "Ystdy"
 
+        target_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
+
         if cumulative:
             # Cumulative burn: from that day until now
-            entry = pick_entry_by_days_strict(entries, days)
+            entry = get_latest_entry_for_date(entries, target_date)
             if not entry:
                 data_burn_lines.append(f"{label}: No data")
                 data_supply_lines.append(f"{label}: No data")
@@ -925,8 +936,9 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             data_supply_lines.append(format_supply_line(label, old_supply))
         else:
             # Daily burn: on that specific day
-            entry_day = pick_entry_by_days_strict(entries, days)
-            entry_day_before = pick_entry_by_days_strict(entries, days + 1)
+            target_date_before = (datetime.now(timezone.utc) - timedelta(days=days + 1)).date()
+            entry_day = get_latest_entry_for_date(entries, target_date)
+            entry_day_before = get_latest_entry_for_date(entries, target_date_before)
             
             if not entry_day or not entry_day_before:
                 data_burn_lines.append(f"{label}: No data")
@@ -945,8 +957,7 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             if burned_on_day > max_burned:
                 max_burned = burned_on_day
                 max_burned_pct = pct
-                # Calculate the date for this day
-                max_burned_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
+                max_burned_date = target_date
 
             total_burned += burned_on_day
             total_pct += pct
