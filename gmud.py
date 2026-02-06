@@ -718,12 +718,25 @@ async def handle_gmud_command(message: Message):
             "---------------------------",
         ]
 
-        # Format each player: nickname and total damage
+        # Format each player: rank, nickname and total damage (rounded to int)
         TOTAL_WIDTH = 27
-        for username, pdata in sorted_players:
-            nick = truncate_nickname(username, 12)  # shorter nickname to fit
-            dmg_str = f"{pdata['damage']:,}".replace(",", " ")
-            line_content = f" {nick:<12} {dmg_str:>10} "
+        num_players = len(sorted_players)
+        # Calculate width needed for rank number (e.g., "1." vs "10." vs "100.")
+        rank_width = len(str(num_players)) + 1  # +1 for the dot
+        
+        for rank, (username, pdata) in enumerate(sorted_players, start=1):
+            # Adjust nickname length based on rank width to fit in total width
+            # Layout: .{rank:>rank_width} {nick:<max_nick_len} {dmg:>10}.
+            # Available for nick = TOTAL_WIDTH(27) - borders(2) - rank_width - spaces(2) - dmg_col(10)
+            max_nick_len = TOTAL_WIDTH - 2 - rank_width - 2 - 10
+            max_nick_len = max(5, max_nick_len)  # Minimum 5 chars for nick
+            
+            nick = truncate_nickname(username, max_nick_len)
+            dmg = int(pdata['damage'])  # Round to int
+            dmg_str = f"{dmg:,}".replace(",", " ")
+            
+            rank_str = f"{rank}."
+            line_content = f"{rank_str:>{rank_width}} {nick:<{max_nick_len}} {dmg_str:>10}"
             lines.append(f".{line_content}.")
 
         lines.append("---------------------------")
