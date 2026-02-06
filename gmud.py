@@ -483,7 +483,38 @@ async def get_gns_total_supply():
                 resp.raise_for_status()
                 data = resp.json()
                 if data and 'stats' in data and len(data['stats']) > 0:
-                    return data['stats'][0]['token_supply'] - DEAD_WALLET_BALANCE 
+                    entries = data['stats']
+                    # Find the latest entry for today by timestamp (API may return in inconsistent order)
+                    # Also track the overall latest entry as fallback
+                    today = datetime.now(timezone.utc).date()
+                    today_latest_entry = None
+                    today_latest_dt = None
+                    overall_latest_entry = None
+                    overall_latest_dt = None
+                    
+                    for e in entries:
+                        date_str = e.get("date")
+                        if not date_str:
+                            continue
+                        entry_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                        
+                        # Track overall latest
+                        if overall_latest_dt is None or entry_dt > overall_latest_dt:
+                            overall_latest_dt = entry_dt
+                            overall_latest_entry = e
+                        
+                        # Track today's latest
+                        if entry_dt.date() == today:
+                            if today_latest_dt is None or entry_dt > today_latest_dt:
+                                today_latest_dt = entry_dt
+                                today_latest_entry = e
+                    
+                    # Prefer today's latest, fallback to overall latest, then first entry
+                    if today_latest_entry:
+                        return today_latest_entry['token_supply'] - DEAD_WALLET_BALANCE
+                    if overall_latest_entry:
+                        return overall_latest_entry['token_supply'] - DEAD_WALLET_BALANCE
+                    return entries[0]['token_supply'] - DEAD_WALLET_BALANCE
                 return None
 
         except Exception as e:
