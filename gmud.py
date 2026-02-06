@@ -777,8 +777,6 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
         await message.reply("❌ No supply history available.")
         return
 
-    today_supply = entries[0]["token_supply"] - DEAD_WALLET_BALANCE
-
     # --- helper: pick entry by exact date ---
     def pick_entry_by_days_strict(entries, days: int):
         target_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
@@ -801,6 +799,27 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
                 latest_entry = e
 
         return latest_entry
+
+    # Get today's supply using the latest entry for today (not just entries[0])
+    today_entry = pick_entry_by_days_strict(entries, 0)
+    if today_entry:
+        today_supply = today_entry["token_supply"] - DEAD_WALLET_BALANCE
+    else:
+        # Fallback: find the most recent entry by timestamp if no entry for today
+        latest_entry = None
+        latest_dt = None
+        for e in entries:
+            date_str = e.get("date")
+            if not date_str:
+                continue
+            entry_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            if latest_dt is None or entry_dt > latest_dt:
+                latest_dt = entry_dt
+                latest_entry = e
+        if latest_entry:
+            today_supply = latest_entry["token_supply"] - DEAD_WALLET_BALANCE
+        else:
+            today_supply = entries[0]["token_supply"] - DEAD_WALLET_BALANCE
 
     # --- formatting helpers ---
     LABEL_WIDTH = 5  # right-align period labels
