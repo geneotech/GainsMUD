@@ -13,27 +13,38 @@ echo "📤 Syncing project files..."
 rsync -avz --exclude ".env" --exclude "gmud_data.json" --exclude ".git" --exclude "venv" --exclude "__pycache__" ./ $REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR
 
 # ---------------------------
-# 2. Install Python dependencies system-wide
+# 2. Install Python dependencies system-wide + Firefox + geckodriver
 # ---------------------------
 ssh $REMOTE_USER@$REMOTE_HOST << 'ENDSSH'
 set -e
 cd ~/gmud
 
 sudo apt update
-sudo apt install -y python3-pip
-sudo apt install python3-httpx python3-requests python3-dotenv python3-dateutil
+sudo apt install -y python3-pip python3-httpx python3-requests python3-dotenv python3-dateutil wget bzip2 ca-certificates
+
 pip3 install --break-system-packages aiogram selenium
 
-# Install Selenium and Firefox WebDriver for whale scraping
-sudo apt install -y firefox wget
+# ---- Install Firefox non-snap ----
+if command -v snap >/dev/null 2>&1 && snap list 2>/dev/null | grep -q firefox; then
+  sudo snap remove firefox
+fi
 
-# ---- FIX: manual geckodriver install ----
+if ! command -v firefox >/dev/null 2>&1 || firefox --version | grep -q snap; then
+  cd /opt
+  sudo wget -q -O firefox.tar.bz2 "https://ftp.mozilla.org/pub/firefox/releases/latest/linux-x86_64/en-US/firefox-111.0.tar.bz2"
+  sudo tar -xjf firefox.tar.bz2
+  sudo rm firefox.tar.bz2
+  sudo ln -sf /opt/firefox/firefox /usr/local/bin/firefox
+fi
+
+# ---- Install geckodriver ----
 if ! command -v geckodriver >/dev/null 2>&1; then
-  wget https://github.com/mozilla/geckodriver/releases/download/v0.35.0/geckodriver-v0.35.0-linux64.tar.gz
-  tar -xzf geckodriver-v0.35.0-linux64.tar.gz
+  GECKO_VERSION="v0.35.0"
+  wget -q https://github.com/mozilla/geckodriver/releases/download/$GECKO_VERSION/geckodriver-$GECKO_VERSION-linux64.tar.gz
+  tar -xzf geckodriver-$GECKO_VERSION-linux64.tar.gz
   sudo mv geckodriver /usr/local/bin/
   sudo chmod +x /usr/local/bin/geckodriver
-  rm geckodriver-v0.35.0-linux64.tar.gz
+  rm geckodriver-$GECKO_VERSION-linux64.tar.gz
 fi
 # ---------------------------------------
 

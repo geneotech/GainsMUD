@@ -141,7 +141,13 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
     guild_str = f"{guild_total:,}".replace(",", " ")
 
 
-    if current_supply < 26_000_000:
+    if current_supply < 25_000_000:
+        lines = [
+            "-----------------------------",
+            ".[   THE ANCIENT SERPENT   ].",
+            ".[                         ].",
+        ]
+    elif current_supply < 26_000_000:
         lines = [
             "-----------------------------",
             ".[   THE ANCIENT SERPENT   ].",
@@ -188,7 +194,26 @@ def format_supplarius(current_supply, recent_damages, last_attacker, last_damage
                 ".                           .",
             ])
         else:
-            if current_supply < 26_000_000:
+            if current_supply < 25_000_000:
+                add_lines = [
+                    ".                           .",       
+                    ".   /)     /  /,,''/--.     .",       
+                    ".  //   / ,(''(    .   \/   .",       
+                    ". //    ('              ./  .",       
+                    ".( \  ,'    .-.-._        / .",       
+                    ". \ \\'     /.--. .)       ./.",       
+                    ".  \     -{/    \ .)        .",       
+                    ".  <\      )     ).:)       .",       
+                    ".   >^,  //     /..:)       .",       
+                    ".    | ,'/     /. .:)      /.",       
+                    ".    ( |(_    (...::)     ( .",       
+                    ".    (O| /     \:.::)       .",       
+                    ".     \|/      /`.:::)      .",       
+                    ".             /  /`,.:)     .",       
+                    ".           ,' ,'.'  `:>-._..",
+                    ".                           ."
+                ]
+            elif current_supply < 26_000_000:
                 add_lines = [
                     ".                           .",
                     ".      ,===:'.,             .",                    
@@ -332,10 +357,6 @@ def format_whale(current_gns, recent_damages, last_attacker, last_damage, player
         f".[{progress_bar}].",
         ".                           .",
     ]
-    
-    # Show "Fight start!" if there are damages
-    if damage_lines:
-        lines.append(".      Fight start!         .")
     
     for line in reversed(damage_lines):
         lines.append(f".{line}.")
