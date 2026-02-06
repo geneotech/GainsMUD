@@ -78,6 +78,65 @@ def generate_progress_bar(current, maximum, length=25):
     empty = length - filled
     return "█" * filled + "-" * empty
 
+def get_latest_entry_for_date(entries, target_date):
+    """Find the latest entry for a specific date by timestamp.
+    
+    API may return entries in inconsistent order, so we need to find
+    the entry with the latest timestamp for the given date.
+    
+    Args:
+        entries: List of entry dicts with 'date' and 'token_supply' fields
+        target_date: A date object to match entries against
+    
+    Returns:
+        The entry dict with the latest timestamp for the target date, or None if not found
+    """
+    latest_entry = None
+    latest_dt = None
+
+    for e in entries:
+        date_str = e.get("date")
+        if not date_str:
+            continue
+
+        entry_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+
+        if entry_dt.date() != target_date:
+            continue
+
+        if latest_dt is None or entry_dt > latest_dt:
+            latest_dt = entry_dt
+            latest_entry = e
+
+    return latest_entry
+
+
+def get_overall_latest_entry(entries):
+    """Find the entry with the most recent timestamp overall.
+    
+    Args:
+        entries: List of entry dicts with 'date' and 'token_supply' fields
+    
+    Returns:
+        The entry dict with the latest timestamp, or None if no valid entries
+    """
+    latest_entry = None
+    latest_dt = None
+
+    for e in entries:
+        date_str = e.get("date")
+        if not date_str:
+            continue
+
+        entry_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+
+        if latest_dt is None or entry_dt > latest_dt:
+            latest_dt = entry_dt
+            latest_entry = e
+
+    return latest_entry
+
+
 def format_supplarius(current_supply, recent_damages, last_attacker, last_damage, players, crossed_million=False, from_status=False):
     global extra_message_last_shown_date
 
@@ -483,7 +542,19 @@ async def get_gns_total_supply():
                 resp.raise_for_status()
                 data = resp.json()
                 if data and 'stats' in data and len(data['stats']) > 0:
-                    return data['stats'][0]['token_supply'] - DEAD_WALLET_BALANCE 
+                    entries = data['stats']
+                    today = datetime.now(timezone.utc).date()
+                    
+                    # Prefer today's latest, fallback to overall latest, then first entry
+                    today_entry = get_latest_entry_for_date(entries, today)
+                    if today_entry:
+                        return today_entry['token_supply'] - DEAD_WALLET_BALANCE
+                    
+                    overall_entry = get_overall_latest_entry(entries)
+                    if overall_entry:
+                        return overall_entry['token_supply'] - DEAD_WALLET_BALANCE
+                    
+                    return entries[0]['token_supply'] - DEAD_WALLET_BALANCE
                 return None
 
         except Exception as e:
@@ -647,12 +718,25 @@ async def handle_gmud_command(message: Message):
             "---------------------------",
         ]
 
-        # Format each player: nickname and total damage
+        # Format each player: rank, nickname and total damage (rounded to int)
         TOTAL_WIDTH = 27
-        for username, pdata in sorted_players:
-            nick = truncate_nickname(username, 12)  # shorter nickname to fit
-            dmg_str = f"{pdata['damage']:,}".replace(",", " ")
-            line_content = f" {nick:<12} {dmg_str:>10} "
+        num_players = len(sorted_players)
+        # Calculate width needed for rank number (e.g., "1." vs "10." vs "100.")
+        rank_width = len(str(num_players)) + 1  # +1 for the dot
+        
+        for rank, (username, pdata) in enumerate(sorted_players, start=1):
+            # Adjust nickname length based on rank width to fit in total width
+            # Layout: .{rank:>rank_width} {nick:<max_nick_len} {dmg:>10}.
+            # Available for nick = TOTAL_WIDTH(27) - borders(2) - rank_width - spaces(2) - dmg_col(10)
+            max_nick_len = TOTAL_WIDTH - 2 - rank_width - 2 - 10
+            max_nick_len = max(5, max_nick_len)  # Minimum 5 chars for nick
+            
+            nick = truncate_nickname(username, max_nick_len)
+            dmg = int(pdata['damage'])  # Round to int
+            dmg_str = f"{dmg:,}".replace(",", " ")
+            
+            rank_str = f"{rank}."
+            line_content = f"{rank_str:>{rank_width}} {nick:<{max_nick_len}} {dmg_str:>10}"
             lines.append(f".{line_content}.")
 
         lines.append("---------------------------")
@@ -777,30 +861,18 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
         await message.reply("❌ No supply history available.")
         return
 
-    today_supply = entries[0]["token_supply"] - DEAD_WALLET_BALANCE
-
-    # --- helper: pick entry by exact date ---
-    def pick_entry_by_days_strict(entries, days: int):
-        target_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
-
-        latest_entry = None
-        latest_dt = None
-
-        for e in entries:
-            date_str = e.get("date")
-            if not date_str:
-                continue
-
-            entry_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-
-            if entry_dt.date() != target_date:
-                continue
-
-            if latest_dt is None or entry_dt > latest_dt:
-                latest_dt = entry_dt
-                latest_entry = e
-
-        return latest_entry
+    # Get today's supply using the latest entry for today
+    today = datetime.now(timezone.utc).date()
+    today_entry = get_latest_entry_for_date(entries, today)
+    if today_entry:
+        today_supply = today_entry["token_supply"] - DEAD_WALLET_BALANCE
+    else:
+        # Fallback: find the most recent entry by timestamp if no entry for today
+        overall_entry = get_overall_latest_entry(entries)
+        if overall_entry:
+            today_supply = overall_entry["token_supply"] - DEAD_WALLET_BALANCE
+        else:
+            today_supply = entries[0]["token_supply"] - DEAD_WALLET_BALANCE
 
     # --- formatting helpers ---
     LABEL_WIDTH = 5  # right-align period labels
@@ -859,9 +931,11 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             if label == "1d":
                 label = "Ystdy"
 
+        target_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
+
         if cumulative:
             # Cumulative burn: from that day until now
-            entry = pick_entry_by_days_strict(entries, days)
+            entry = get_latest_entry_for_date(entries, target_date)
             if not entry:
                 data_burn_lines.append(f"{label}: No data")
                 data_supply_lines.append(f"{label}: No data")
@@ -875,8 +949,9 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             data_supply_lines.append(format_supply_line(label, old_supply))
         else:
             # Daily burn: on that specific day
-            entry_day = pick_entry_by_days_strict(entries, days)
-            entry_day_before = pick_entry_by_days_strict(entries, days + 1)
+            target_date_before = (datetime.now(timezone.utc) - timedelta(days=days + 1)).date()
+            entry_day = get_latest_entry_for_date(entries, target_date)
+            entry_day_before = get_latest_entry_for_date(entries, target_date_before)
             
             if not entry_day or not entry_day_before:
                 data_burn_lines.append(f"{label}: No data")
@@ -895,8 +970,7 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
             if burned_on_day > max_burned:
                 max_burned = burned_on_day
                 max_burned_pct = pct
-                # Calculate the date for this day
-                max_burned_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
+                max_burned_date = target_date
 
             total_burned += burned_on_day
             total_pct += pct
