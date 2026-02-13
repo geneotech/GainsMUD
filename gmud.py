@@ -410,7 +410,7 @@ def format_whale(current_gns, recent_damages, last_attacker, last_damage, player
     
     lines = [
         "-----------------------------",
-        ".[        THE WHALE        ].",
+        ".[       THE SHRIMP        ].",
         ".[                         ].",
         f".{gns_line}.",
         f".[{progress_bar}].",

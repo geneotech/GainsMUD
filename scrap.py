@@ -33,6 +33,9 @@ def get_gns_amount():
             text = cell.text.strip()
             if re.match(r'^[\d,]+\.\d+$', text):
                 return text.replace(',', '')
+
+        return "0"
+
     finally:
         driver.quit()
 
