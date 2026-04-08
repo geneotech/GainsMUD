@@ -1105,6 +1105,9 @@ async def handle_drag_command(message: Message):
         await message.reply(code_block(supplarius), parse_mode="MarkdownV2")
 
 async def handle_wha_command(message: Message):
+    await message.reply("❌ No limited-time event at this time.")
+    return
+
     async with DATA_LOCK:
         print("Wha command detected")
 
