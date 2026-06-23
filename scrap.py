@@ -21,9 +21,14 @@ def get_gns_amount():
 
     try:
         driver.get(URL)
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.LINK_TEXT, "GNS"))
-        )
+
+        try:
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.LINK_TEXT, "GNS"))
+            )
+        except TimeoutException:
+            # GNS not present on the page at all
+            return "0"
 
         gns_link = driver.find_element(By.LINK_TEXT, "GNS")
         row = gns_link.find_element(By.XPATH, "./ancestor::div[contains(@class,'db-table-row')]")
@@ -33,6 +38,9 @@ def get_gns_amount():
             text = cell.text.strip()
             if re.match(r'^[\d,]+\.\d+$', text):
                 return text.replace(',', '')
+
+        return "0"
+
     finally:
         driver.quit()
 

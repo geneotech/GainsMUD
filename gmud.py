@@ -31,7 +31,7 @@ COOLDOWN_MINUTES = 30
 GLOBAL_COOLDOWN_HOURS = 1.5
 MAX_SUPPLY = 38_892_000
 MAX_RECENT_DAMAGES = 3
-SUPPLY_FETCH_ATTEMPTS = 5
+FETCH_ATTEMPTS = 5
 SUPPLY_FETCH_SES = 4
 # DEAD_WALLET_BALANCE = 311603
 DEAD_WALLET_BALANCE = 0
@@ -410,7 +410,7 @@ def format_whale(current_gns, recent_damages, last_attacker, last_damage, player
     
     lines = [
         "-----------------------------",
-        ".[        THE WHALE        ].",
+        ".[       THE SHRIMP        ].",
         ".[                         ].",
         f".{gns_line}.",
         f".[{progress_bar}].",
@@ -535,7 +535,7 @@ def format_time(seconds):
 async def get_gns_total_supply():
     url = BACKEND_URL
 
-    for attempt in range(SUPPLY_FETCH_ATTEMPTS):
+    for attempt in range(FETCH_ATTEMPTS):
         try:
             async with httpx.AsyncClient(timeout=SUPPLY_FETCH_SES) as client:
                 resp = await client.get(url)
@@ -558,8 +558,8 @@ async def get_gns_total_supply():
                 return None
 
         except Exception as e:
-            print(f"[Attempt {attempt+1}/{SUPPLY_FETCH_ATTEMPTS}] Error fetching supply: {e}")
-            if attempt < SUPPLY_FETCH_ATTEMPTS - 1:
+            print(f"[Attempt {attempt+1}/{FETCH_ATTEMPTS}] Error fetching supply: {e}")
+            if attempt < FETCH_ATTEMPTS - 1:
                 await asyncio.sleep(0.5)
 
     return None
@@ -848,14 +848,22 @@ async def _handle_burn_impl(message: Message, cumulative: bool):
                 return
 
     # --- fetch supply history ---
-    async with httpx.AsyncClient(timeout=5) as client:
+    entries = None
+    for attempt in range(FETCH_ATTEMPTS):
         try:
-            r = await client.get(BACKEND_URL)
-            r.raise_for_status()
-            entries = r.json().get("stats", [])
-        except:
-            await message.reply("❌ Failed to fetch supply history.")
-            return
+            async with httpx.AsyncClient(timeout=5) as client:
+                r = await client.get(BACKEND_URL)
+                r.raise_for_status()
+                entries = r.json().get("stats", [])
+                break
+        except Exception as e:
+            print(f"[Attempt {attempt+1}/{FETCH_ATTEMPTS}] Error fetching supply history: {e}")
+            if attempt < FETCH_ATTEMPTS - 1:
+                await asyncio.sleep(0.5)
+
+    if entries is None:
+        await message.reply("❌ Failed to fetch supply history.")
+        return
 
     if not entries:
         await message.reply("❌ No supply history available.")
